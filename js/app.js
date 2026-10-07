@@ -12,6 +12,7 @@
   UI.route('/stars', function () { Home.stars(); });
   UI.route('/parent', function () { Parent.open(); });
   UI.route('/report', function () { Parent.report(); });
+  UI.route('/hours', function () { Parent.hours(); });
 
   // End-of-week / end-of-month nudge to save a copy (parent-gated).
   Player.afterLesson = function (c) {
@@ -25,6 +26,10 @@
         h('div', { class: 'row', style: { justifyContent: 'flex-end' } }, h('button', { class: 'btn ghost', onclick: function () { m.close(); } }, 'Later'), h('button', { class: 'btn gold', onclick: function () { m.close(); UI.requirePin(function () { Parent.downloadBackup(); UI.toast('Backup downloaded.'); }); } }, 'Parent: save copy'))));
     }, 900);
   };
+
+  // timers (PE, novel, rotation) keep counting on every screen; refresh the clocks on Home
+  setInterval(function () { var stopped = Player.Timers.tick(); if (location.hash === '' || location.hash === '#/') { if (stopped) Home.render(); else Home.tickTimers(); } }, 5000);
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden') { Player.Timers.running().forEach(Player.Timers.log); Store.save(); } });
 
   // sync: on open, when the tab comes back, and every few minutes
   function trySync() { if (Sync.cfg && Sync.auth) Sync.syncNow().then(function (r) { if (r.ok && (location.hash === '' || location.hash === '#/')) Home.render(); }); }

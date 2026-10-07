@@ -16,13 +16,24 @@
     C.lessons[l.id] = l; return l;
   };
 
+  // Year-long content banks (added in v3). C.unit('science', 5, {...}) registers week 5's science unit.
+  // Banks are plain data; js/schedule.js turns them into daily lessons.
+  C.bank = {};
+  C.unit = function (subject, week, u) {
+    var b = C.bank[subject] = C.bank[subject] || {};
+    if (b[week]) throw new Error('duplicate ' + subject + ' unit for week ' + week);
+    u.week = week; u.subject = subject; b[week] = u; return u;
+  };
+  C.prompts = C.prompts || {};
+
   // week -> role -> [lessonIds]   (role: mon tue wed thu fri)
   C.plan = function (week, role, ids) { (C.weeks[week] = C.weeks[week] || {})[role] = ids; };
 
   C.SUBJECTS = {
     math: { name: 'Math', color: '#2f6fed' }, grammar: { name: 'Language Arts', color: '#c2418c' }, spelling: { name: 'Spelling', color: '#8a4fd6' },
     reading: { name: 'Reading', color: '#d8561f' }, writing: { name: 'Writing', color: '#0e8f7a' }, science: { name: 'Science', color: '#2a9d3c' },
-    social: { name: 'Social Studies', color: '#b8860b' }, bible: { name: 'Bible', color: '#5b4bb7' }, fun: { name: 'Game Day', color: '#e0457b' }
+    social: { name: 'Social Studies', color: '#b8860b' }, bible: { name: 'Bible', color: '#5b4bb7' }, fun: { name: 'Game Day', color: '#e0457b' },
+    pe: { name: 'PE', color: '#d9480f' }, arts: { name: 'Arts and enrichment', color: '#7048e8' }
   };
 
   var api = C;

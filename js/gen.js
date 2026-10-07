@@ -37,7 +37,7 @@
     var idx = S.pick(nz), d = ds[idx], place = PLACES[len - 1 - idx], value = d * Math.pow(10, len - 1 - idx);
     var named = ds.map(function (x, i) { return x + ' in the ' + PLACES[len - 1 - i] + ' place'; });
     if (S.r() < 0.5) {
-      return { skill: 'place-value', kind: 'num', q: 'In ' + fmt(n) + ', what is the VALUE of the digit ' + d + ' in the ' + place + ' place?', a: String(value),
+      return { skill: 'place-value', kind: 'num', pic: { t: 'pv', n: n }, q: 'In ' + fmt(n) + ', what is the VALUE of the digit ' + d + ' in the ' + place + ' place?', a: String(value),
         hint: 'Value means the digit times its place. Count how many places it is from the right.',
         steps: ['Write the number and name every place, starting from the RIGHT (ones, tens, hundreds, ...): ' + ds.map(function (x, i) { return x + ' = ' + PLACES[len - 1 - i]; }).join(', ') + '.',
           'Find the digit ' + d + ' that the question asks about. It sits in the ' + place + ' place.',
@@ -218,9 +218,27 @@
   }
 
   // Answer check: tolerant of commas, spaces, "r"/"R" remainder format.
+  // v3: problems may set `at` (answer type): 'dec' (numeric value), 'frac' (any equivalent fraction or mixed number),
+  // 'coord' (an ordered pair), 'choice' (one of `choices`), or `alts` (other accepted answers).
   function norm(s) { return String(s).toLowerCase().replace(/[,\s]/g, '').replace(/remainder/g, 'r'); }
-  function check(problem, given) { return norm(given) === norm(problem.a); }
+  function parseFrac(s) {
+    s = String(s).trim().replace(/\s+/g, ' ').replace(/^(-?\d+)-(\d+\/\d+)$/, '$1 $2'); var m;
+    if ((m = s.match(/^(-?\d+) (\d+)\/(\d+)$/))) { var d = +m[3]; return d ? (+m[1]) + (+m[2]) / d : NaN; }
+    if ((m = s.match(/^(-?\d+)\/(\d+)$/))) { return +m[2] ? (+m[1]) / (+m[2]) : NaN; }
+    if (/^-?\d+(\.\d+)?$/.test(s)) return +s; return NaN;
+  }
+  function parseNum(s) { s = String(s).trim().replace(/,/g, '').replace(/\s/g, ''); return /^-?(\d+\.?\d*|\.\d+)$/.test(s) ? +s : NaN; }
+  function check(problem, given) {
+    var at = problem.at, g = String(given == null ? '' : given).trim(); if (!g) return false;
+    if (problem.alts && problem.alts.some(function (x) { return norm(x) === norm(g); })) return true;
+    if (at === 'dec') { var v = parseNum(g); return !isNaN(v) && Math.abs(v - +problem.a) < 1e-9; }
+    if (at === 'frac') { var f = parseFrac(g), t = parseFrac(problem.a); return !isNaN(f) && Math.abs(f - t) < 1e-9; }
+    if (at === 'coord') { var p = g.replace(/[()\s]/g, '').split(/[,;]/), q = String(problem.a).replace(/[()\s]/g, '').split(','); return p.length === 2 && +p[0] === +q[0] && +p[1] === +q[1] && p[0] !== '' && p[1] !== ''; }
+    return norm(g) === norm(problem.a);
+  }
+  // register more topics (js/gen2.js adds the rest of the year)
+  function add(name, fn) { TOPICS[name] = fn; if (api.TOPICS.indexOf(name) < 0) api.TOPICS.push(name); }
 
-  var api = { make: make, check: check, TOPICS: Object.keys(TOPICS), fmt: fmt, mk: mk };
+  var api = { make: make, check: check, TOPICS: Object.keys(TOPICS), fmt: fmt, mk: mk, add: add, digits: digits, PLACES: PLACES, NAMES: NAMES, THINGS: THINGS, parseFrac: parseFrac, parseNum: parseNum };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Gen = api;
 })(typeof window !== 'undefined' ? window : globalThis);
