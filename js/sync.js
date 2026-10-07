@@ -97,7 +97,7 @@
       if (remote && (typeof remote !== 'object' || Array.isArray(remote))) throw new Error('The cloud copy looks damaged, so nothing was overwritten. Try again later.');
       // Store.merge keeps every key it does not know about, so data written by a newer app version is never dropped.
       var merged = remote ? Store.merge(Store.state, remote) : Store.state;
-      Store.state = merged; Store.save();
+      Store.state = Store.adopt ? Store.adopt(merged, Store.state) : merged; Store.save();
       // keep any extra top-level fields a newer version may have put in the cloud wrapper
       var out = Object.assign({}, wrapper || {}, { app: 'Ava School', schema: 3, state: merged });
       await push(out);

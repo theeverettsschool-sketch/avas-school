@@ -72,6 +72,9 @@
       h('div', { class: 'row', style: { justifyContent: 'flex-end' } }, h('button', { class: 'btn ghost', onclick: function () { m.close(); Track.asking = false; activity(); UI.go('/'); } }, 'I am taking a break'), h('button', { class: 'btn gold', onclick: function () { m.close(); Track.asking = false; activity(); Track.lastTick = Date.now(); } }, 'I am here!'))), { dismiss: false });
   }
   Player.trackStop = trackStop;
+  // save the running lesson's time when the iPad sleeps or the app is switched away
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden' && Track.c) flushTime(Track.c); });
+  root.addEventListener && root.addEventListener('pagehide', function () { if (Track.c) flushTime(Track.c); });
   function touch(c) { activity(); }
   function award(c, n, why) {
     if (c.practice || n <= 0) return 0; n = Math.min(n, c.cap - c.given); if (n <= 0) return 0;

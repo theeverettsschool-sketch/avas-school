@@ -28,6 +28,7 @@
       memory: {},     // verseId -> {box, due, _u}  (Leitner spaced repetition)
       parentVerses: {}, // verseId -> NIV text pasted by parent
       badges: {},     // id -> {ts}
+      readlog: {},    // lessonId -> {date, book, pages, summary, mins, ts, _u}  (v3 novel reading log)
       streak: { last: '', n: 0, best: 0, _u: 0 },
       log: []         // small event log (last 200)
     };
@@ -122,9 +123,25 @@
   function removeTime(id) { var e = S.state.time[id]; if (!e) return; e.secs = 0; e.removed = true; e._u = now(); syncLegacy(e.date); }
   function timeEntries(filter) { var out = [], T = S.state.time || {}; for (var k in T) { var e = T[k]; if (!e.removed && e.secs > 0 && (!filter || filter(e))) out.push(e); } return out; }
   function timeSecs(dateIso, filter) { var t = 0; timeEntries(function (e) { return e.date === dateIso && (!filter || filter(e)); }).forEach(function (e) { t += e.secs; }); return t; }
-  // Minutes for a day = the larger of (sum of time entries) and the legacy minutes field (older versions only wrote that).
-  function dayMinutes(dateIso) { var a = S.state.attendance[dateIso]; return Math.max(Math.floor(timeSecs(dateIso) / 60), (a && a.mins) || 0); }
-  function syncLegacy(dateIso) { if (!dateIso) return; var a = S.state.attendance[dateIso] || (S.state.attendance[dateIso] = { mins: 0, lessons: 0, _u: 0 }); var m = Math.floor(timeSecs(dateIso) / 60); if (m > a.mins) { a.mins = m; a._u = now(); } }
+  // Legacy attendance[date].mins is still written for older app versions. It holds (minutes from time entries) + (minutes
+  // only an older version logged). attendance[date].tmins remembers the time-entry part, so the old-version part is
+  // mins - tmins. A day's minutes = time entries + old-version part: removing an entry really lowers the total, and
+  // minutes logged by an un-updated device on the same day are added instead of hidden by a max().
+  function legacyExtra(a) { return a ? Math.max(0, (+a.mins || 0) - (+a.tmins || 0)) : 0; }
+  function dayMinutes(dateIso) { return Math.floor(timeSecs(dateIso) / 60) + legacyExtra(S.state.attendance[dateIso]); }
+  function syncLegacy(dateIso) {
+    if (!dateIso) return; var a = S.state.attendance[dateIso] || (S.state.attendance[dateIso] = { mins: 0, lessons: 0, _u: 0 });
+    var t = Math.floor(timeSecs(dateIso) / 60), x = legacyExtra(a);
+    if (a.tmins !== t || a.mins !== x + t) { a.mins = x + t; a.tmins = t; a._u = now(); }
+  }
+  // one pass over all time entries: date -> minutes (used by the yearly totals so they stay fast as entries pile up)
+  function allDayMinutes() {
+    var secs = {}, out = {}, T = S.state.time || {}, A = S.state.attendance || {}, d;
+    for (var k in T) { var e = T[k]; if (e && !e.removed && e.secs > 0 && e.date) secs[e.date] = (secs[e.date] || 0) + e.secs; }
+    for (d in A) out[d] = legacyExtra(A[d]);
+    for (d in secs) out[d] = (out[d] || 0) + Math.floor(secs[d] / 60);
+    return out;
+  }
   function markAttendance(dateIso, minutes) {
     var a = S.state.attendance[dateIso] || (S.state.attendance[dateIso] = { mins: 0, lessons: 0, _u: 0 });
     if (minutes) addTime({ date: dateIso, secs: minutes * 60, src: 'app' });
@@ -133,12 +150,12 @@
   function threshold() { var t = +S.state.settings.dayMinutes; return t > 0 ? t : 270; }
   // A day counts toward Georgia's 180 when its minutes reach the parent's threshold (default 270 = 4.5 hours).
   function dayCounts(dateIso) { return dayMinutes(dateIso) >= threshold(); }
-  function datesWithTime() { var d = {}; for (var k in S.state.attendance) d[k] = 1; timeEntries().forEach(function (e) { d[e.date] = 1; }); return Object.keys(d).sort(); }
+  function datesWithTime() { return Object.keys(allDayMinutes()).sort(); }
   function daysCounted() {
-    var n = S.state.settings.priorDays || 0; datesWithTime().forEach(function (d) { if (dayCounts(d)) n++; });
+    var n = +S.state.settings.priorDays || 0, M = allDayMinutes(), thr = threshold(); for (var d in M) if (M[d] >= thr) n++;
     return n;
   }
-  function totalMinutes(fromIso, toIso) { var m = 0; datesWithTime().forEach(function (d) { if ((!fromIso || d >= fromIso) && (!toIso || d <= toIso)) m += dayMinutes(d); }); return m; }
+  function totalMinutes(fromIso, toIso) { var m = 0, M = allDayMinutes(); for (var d in M) if ((!fromIso || d >= fromIso) && (!toIso || d <= toIso)) m += M[d]; return m; }
   function totalHours(fromIso, toIso) { return Math.round(totalMinutes(fromIso, toIso) / 6) / 10; }
   function minutesBySubject(fromIso, toIso) { var o = {}; timeEntries(function (e) { return (!fromIso || e.date >= fromIso) && (!toIso || e.date <= toIso); }).forEach(function (e) { var k = e.subject || 'other'; o[k] = (o[k] || 0) + e.secs / 60; }); for (var k in o) o[k] = Math.round(o[k]); return o; }
   function blockSecs(dateIso, block) { return timeSecs(dateIso, function (e) { return e.block === block; }); }
@@ -163,8 +180,8 @@
     var m = migrate(JSON.parse(JSON.stringify(local))), r = migrate(JSON.parse(JSON.stringify(remote)));
     m.profile = (r.profile && r.profile.name && !m.profile.name) ? r.profile : m.profile;
     m.settings = (r.settings._u || 0) > (m.settings._u || 0) ? r.settings : m.settings;
-    var KNOWN = ['v', 'device', 'profile', 'settings', 'progress', 'skills', 'ledger', 'payouts', 'attendance', 'time', 'writing', 'spelling', 'bible', 'memory', 'parentVerses', 'badges', 'streak', 'log', '_saved'];
-    ['progress', 'skills', 'payouts', 'writing', 'spelling', 'bible', 'memory', 'parentVerses', 'badges'].forEach(function (k) { m[k] = mergeMap(m[k], r[k]); });
+    var KNOWN = ['v', 'device', 'profile', 'settings', 'progress', 'skills', 'ledger', 'payouts', 'attendance', 'time', 'writing', 'spelling', 'bible', 'memory', 'parentVerses', 'badges', 'readlog', 'streak', 'log', '_saved'];
+    ['progress', 'skills', 'payouts', 'writing', 'spelling', 'bible', 'memory', 'parentVerses', 'badges', 'readlog'].forEach(function (k) { m[k] = mergeMap(m[k], r[k]); });
     // keys this version does not know (added by a newer version): keep them, never drop them
     Object.keys(r).forEach(function (k) {
       if (KNOWN.indexOf(k) >= 0) return;
@@ -172,7 +189,7 @@
       else if (m[k] && r[k] && typeof m[k] === 'object' && typeof r[k] === 'object' && !Array.isArray(m[k]) && !Array.isArray(r[k])) m[k] = mergeMap(m[k], r[k]);
     });
     // time entries: union by id; the same id is one growing session, so keep the larger amount
-    m.time = {}; [local.time || {}, remote.time || {}].forEach(function (x) { for (var id in x) { var c = m.time[id], e = x[id]; if (!c) m.time[id] = e; else { var keep = (e.removed || c.removed) ? ((e._u || 0) > (c._u || 0) ? e : c) : (e.secs > c.secs ? e : c); m.time[id] = keep; } } });
+    m.time = {}; [local.time || {}, remote.time || {}].forEach(function (x) { for (var id in x) { var c = m.time[id], e = x[id]; if (!c) m.time[id] = e; else { var keep = (e.removed || c.removed) ? (((e._u || 0) > (c._u || 0) || ((e._u || 0) === (c._u || 0) && e.removed)) ? e : c) : (e.secs > c.secs ? e : c); m.time[id] = keep; } } });
     // progress: never let a merge un-complete a lesson, keep best score
     for (var id in m.progress) { var lp = local.progress && local.progress[id], rp = remote.progress && remote.progress[id]; if ((lp && lp.done) || (rp && rp.done)) m.progress[id].done = true; }
     // skills: counts only grow; take max of each side (same events seen on both devices) – safe & conservative
@@ -182,8 +199,21 @@
     // attendance: per day take the larger minutes
     m.attendance = {}; [local.attendance || {}, remote.attendance || {}].forEach(function (x) { for (var d in x) { var c = m.attendance[d]; if (!c || x[d].mins > c.mins) m.attendance[d] = Object.assign({}, x[d]); if (x[d].counted) m.attendance[d].counted = true; } });
     m.streak = (r.streak.best > m.streak.best || r.streak.last > m.streak.last) ? r.streak : m.streak;
-    m.log = (m.log || []).concat(r.log || []).sort(function (a, b) { return a.ts - b.ts; }).slice(-200);
+    var seen = {}; m.log = (m.log || []).concat(r.log || []).filter(function (x) { var k = JSON.stringify(x); if (seen[k]) return false; seen[k] = 1; return true; }).sort(function (a, b) { return a.ts - b.ts; }).slice(-200);
     return m;
+  }
+  // After a sync, reuse this device's own objects wherever the merged copy has the same content. Open screens hold
+  // references (a journal being typed, the settings object); without this a background sync would detach them and
+  // the next keystrokes or "Turn it in" would be written to an orphaned copy and lost.
+  function adopt(next, prev) {
+    if (!next || !prev) return next;
+    Object.keys(next).forEach(function (k) {
+      var a = next[k], b = prev[k];
+      if (!a || !b || typeof a !== 'object' || typeof b !== 'object' || Array.isArray(a) || Array.isArray(b)) return;
+      if (JSON.stringify(a) === JSON.stringify(b)) { next[k] = b; return; }
+      for (var id in a) { if (b[id] && typeof a[id] === 'object' && JSON.stringify(a[id]) === JSON.stringify(b[id])) a[id] = b[id]; }
+    });
+    return next;
   }
 
   // ---------- exports ----------
@@ -220,7 +250,7 @@
     recordSkill: recordSkill, weakSkills: weakSkills, markAttendance: markAttendance, daysCounted: daysCounted, totalHours: totalHours,
     newId: newId, logTime: logTime, addTime: addTime, removeTime: removeTime, timeEntries: timeEntries, timeSecs: timeSecs, dayMinutes: dayMinutes, dayCounts: dayCounts, threshold: threshold,
     datesWithTime: datesWithTime, totalMinutes: totalMinutes, minutesBySubject: minutesBySubject, blockSecs: blockSecs, DEFAULT_RATE: DEFAULT_RATE, DEFAULT_CAP: DEFAULT_CAP,
-    touchStreak: touchStreak, merge: merge, exportAll: exportAll, importAll: importAll, exportCSV: exportCSV, exportRange: exportRange, hashPin: hashPin,
+    touchStreak: touchStreak, merge: merge, adopt: adopt, allDayMinutes: allDayMinutes, exportAll: exportAll, importAll: importAll, exportCSV: exportCSV, exportRange: exportRange, hashPin: hashPin,
     get state() { return S.state; }, set state(v) { S.state = v; }
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Store = api;
