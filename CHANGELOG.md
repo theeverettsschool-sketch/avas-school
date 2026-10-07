@@ -33,3 +33,12 @@
 ## Money (section 5)
 - Weekly max $15. A full, solid week (every block done, about 80% right on the first try) earns about 950–1,000 stars, so the default is **65 stars = $1**.
 - Devices still on the old untouched defaults (50 stars/$, $10) move to the new ones automatically. Custom values are kept.
+
+## Review fixes (before release)
+- `config.js`: the delivered copy had blank Firebase settings; the live settings were kept unchanged.
+- Day totals: removing parent-added minutes now lowers the day total. Before, the legacy minutes field kept the old, higher number. Minutes logged by an older app version on the same day are added to the time entries (tracked with `attendance[date].tmins`) instead of being hidden by a max().
+- Merge: a removal wins a same-millisecond tie; the reading log (`readlog`) is a known, merged key; duplicate event-log lines from repeated syncs are removed.
+- Sync: after a background sync, unchanged records keep the same objects, so a journal being typed (or any open screen) keeps saving into the live state and isn't orphaned.
+- Lesson time is saved when the iPad sleeps or the app is switched away (not only every 15 seconds).
+- The printable hours record has a total-hours-by-subject row.
+- Yearly totals (days counted, total hours) are computed in one pass over the time entries, so they stay fast as entries pile up.
