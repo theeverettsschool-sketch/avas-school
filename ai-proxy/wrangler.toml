@@ -1,0 +1,11 @@
+name = "ava-grader"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+
+[vars]
+ALLOWED_ORIGIN = "https://theeverettsschool-sketch.github.io"
+AI_BASE_URL = "https://api.openai.com/v1"
+AI_MODEL = "gpt-4o-mini"
+RATE_PER_MIN = "20"
+RATE_PER_DAY = "300"
+# AI_API_KEY is a secret: set it with `npx wrangler secret put AI_API_KEY` (never put it in this file)

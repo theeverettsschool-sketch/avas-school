@@ -25,7 +25,7 @@
         reasons.push('Some of this looks like repeated or made-up words. Use real sentences that say something new each time.');
     }
     var kw = keywords(o.prompt);
-    if (n >= 5 && kw.length >= 3 && !kw.some(function (k) { return lw.some(function (w) { return w.slice(0, 5) === k.slice(0, 5); }); }))
+    if (n >= 5 && kw.length >= 2 && !kw.some(function (k) { return lw.some(function (w) { return w.slice(0, 5) === k.slice(0, 5); }); }))
       reasons.push('Make sure you answer the question: "' + String(o.prompt).slice(0, 120) + '" Use some of its words in your answer.');
     if (n >= 4) {
       var sents = t.split(/(?<=[.!?])\s+/).map(function (x) { return x.trim(); }).filter(Boolean), low = sents.filter(function (x) { return /^[a-z]/.test(x); }).length;
@@ -63,7 +63,7 @@
       if (sc) { var o = old[L.id] || {}, it = { key: L.id, kind: 'auto', lesson: L.id, title: L.title, subject: L.subject, right: sc.right, total: sc.total, pct: sc.pct, flag: sc.pct < C.pct ? 'redo' : null, reasons: sc.pct < C.pct ? ['You got ' + sc.right + ' of ' + sc.total + ' (' + sc.pct + '%). Redo the ones you missed to reach ' + C.pct + '%.'] : [], redo: o.redo || null, cleared: !!o.cleared, required: !!o.required, _u: now };
         if (o.required && !it.flag) { it.flag = 'redo'; it.reasons = ['Your parent asked you to redo this one.']; } items[L.id] = it; }
       if (p && p.done) lessonWritings(L, st).forEach(function (w) {
-        var o = old[w.key] || {}, ch = checkWriting(w.text, w), it = { key: w.key, kind: 'write', lesson: L.id, wkey: w.wkey, rkey: w.rkey, field: w.field, title: L.title, what: w.what, prompt: w.prompt, min: w.min, subject: L.subject, words: ch.words, flag: ch.ok ? null : 'try', reasons: ch.reasons, ai: o.ai || null, redo: o.redo || null, cleared: !!o.cleared, required: !!o.required, _u: now };
+        var o = old[w.key] || {}, ch = checkWriting(w.text, w), it = { key: w.key, kind: 'write', lesson: L.id, wkey: w.wkey, rkey: w.rkey, field: w.field, title: L.title, what: w.what, prompt: w.prompt, min: w.min, subject: L.subject, words: ch.words, flag: ch.ok ? null : 'try', reasons: ch.reasons, ai: o.ai || null, redo: (o.redo && o.redo.textHash === hash(w.text)) ? o.redo : null, cleared: !!o.cleared, required: !!o.required, _u: now };
         if (it.ai && it.ai.textHash === hash(w.text)) applyAiToItem(it, it.ai);
         if (o.required && !it.flag) { it.flag = 'try'; it.reasons = ['Your parent asked you to work on this one again.']; }
         items[w.key] = it;
@@ -100,7 +100,7 @@
     var S = St(), st = S.state, rev = st.reviews[date], it = rev && rev.items[key]; if (!it) return null;
     if (it.rkey) { var R = st.readlog[it.rkey]; R.summary = text; R._u = S.now(); }
     else { var w = st.writing[it.wkey]; if (it.field) { w.fields = w.fields || {}; w.fields[it.field] = text; } else w.text = text; w.revisedAt = S.now(); w._u = S.now(); }
-    var ch = checkWriting(text, it); it.words = ch.words; it.redo = { tries: ((it.redo && it.redo.tries) || 0) + 1, passed: ch.ok, ts: S.now(), reasons: ch.reasons }; it._u = S.now(); touch(rev);
+    var ch = checkWriting(text, it); it.words = ch.words; it.redo = { tries: ((it.redo && it.redo.tries) || 0) + 1, passed: ch.ok, ts: S.now(), reasons: ch.reasons, textHash: hash(text) }; it._u = S.now(); touch(rev);
     return ch;
   }
   function parentSet(date, key, action) {
@@ -140,6 +140,7 @@
   function applyAiToItem(it, ai) {
     it.ai = ai; var local = checkWriting(it.text !== undefined ? it.text : '', it), tooShort = (it.words || 0) < (it.min || 0);
     // AI decides, but the minimum-length rule always stands
+    if (it.required && !it.cleared) { it.flag = 'try'; it.reasons = ['Your parent asked you to work on this one again.'].concat(ai.fixes || []); return; }
     if (ai.redo || tooShort) { it.flag = 'try'; var rs = []; if (tooShort) rs.push(local.reasons[0] || ('It needs at least ' + it.min + ' words.')); if (ai.redo) rs = rs.concat(ai.fixes.length ? ai.fixes : [ai.feedbackForStudent]); it.reasons = rs.filter(Boolean); }
     else { it.flag = null; it.reasons = []; }
   }
