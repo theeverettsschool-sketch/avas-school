@@ -81,7 +81,7 @@
     var big = document.getElementById('reqbig'); if (big) big.textContent = left > 0 ? fmtClock(left) : '0:00';
   }
   // test-only hook (localhost / file only): pretend `secs` of focused time passed on the open assignment
-  Player._advanceReq = function (secs) { if (!/^(localhost|127\.0\.0\.1)$/.test(location.hostname) || !Track.c) return false; addReq(Track.c, secs); tick(true); return reqLeft(Track.c); };
+  Player._advanceReq = function (secs) { if (!/^(localhost|127\.0\.0\.1)$/.test(location.hostname) || !Track.c) return false; var c = Track.c; addReq(c, secs); tick(true); return reqLeft(c); };
   var blurred = false;
   root.addEventListener && root.addEventListener('blur', function () { blurred = true; });
   root.addEventListener && root.addEventListener('focus', function () { blurred = false; Track.lastTick = Date.now(); });
@@ -874,7 +874,7 @@
   function dayDone(date) { UI.commit(); UI.go('/finish/' + date); }
   Player.endDay = function (date, c) {
     var st = Store.state, R = st.reviews || (st.reviews = {}), rev = R[date] || Review.build(date); rev.endedByParent = true; rev._u = Store.now();
-    if (c) { c.held = null; trackStop(); } UI.commit(); UI.go('/finish/' + date);
+    if (c) { c.held = null; trackStop(); } UI.commit(); if (location.hash === '#/finish/' + date) Finish.open(date); else UI.go('/finish/' + date);
   };
   // generic active-time tracker (writing corrections): counts like lessons do, tagged with its own lesson tag
   Player.trackSimple = function (date, tag, subject, block) { var c = { lesson: { id: tag, subject: subject || '' }, date: date, block: block || '', secs: 0, sessSecs: 0, trackAs: tag }; trackStart(c); return function () { trackStop(); }; };

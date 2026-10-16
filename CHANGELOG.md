@@ -1,3 +1,12 @@
+# Ava's School v5 (Phase 3)
+
+## Finish my day + corrections + practice rounds
+- *Finish my day ✔* (bottom of today and of any past day) reviews every assignment. Auto-graded work under the parent threshold (default 80%, Parent → Settings → Finish my day) is flagged **Redo** and shows only the missed items, or a fresh similar math set. Writing (journal, project, typed answers, reading log) gets kind local checks for length, gibberish, staying on the prompt, and capitals/periods, and is flagged **Try again** if it fails. Fixing mistakes earns small bonus stars (on by default).
+- **New day flow (v5):** per-assignment timers are now a parent setting (*Per-assignment timers*, default **Off**; already-credited minutes stay). Lessons log real tracked time. After *Finish my day*, corrections come first (their time counts, tagged `redo:`/`fix:`), then **Practice rounds** fill exactly the minutes left to the day target (Parent → School day minutes, default 270): adaptive practice, weakest subjects first, rotating every ~12 min, small bonus stars, stops at the target with "Your school day is done!". If the target is already reached, practice is skipped. Parent PIN can end the day early. The daily report shows assignments / corrections / practice / total vs target. Past days work the same way and credit their own date.
+- Parent → Daily report: scores, flags, redo results, her writing, and the time breakdown. It is printable, and with the PIN you can clear a flag or require a redo.
+- Optional AI writing feedback: set an AI grading URL (off when blank). The proxy lives in `ai-proxy/` (Cloudflare Worker; the key stays a server secret). If it is off, offline, or errors, the local checks are used.
+- State is additive (`reviews`, `practice`, new settings) and the sync merge is safe. sw cache v5.
+
 # Ava's School v4 (Phase 2)
 
 ## Required time per assignment

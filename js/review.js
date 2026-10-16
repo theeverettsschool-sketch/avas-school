@@ -69,7 +69,7 @@
         items[w.key] = it;
       });
     });
-    var rev = R[date] = { date: date, ts: (R[date] && R[date].ts) || now, items: items, done: false, celebrated: !!(R[date] && R[date].celebrated), _u: now };
+    var rev = R[date] = { date: date, ts: (R[date] && R[date].ts) || now, items: items, done: false, celebrated: !!(R[date] && R[date].celebrated), endedByParent: !!(R[date] && R[date].endedByParent), _u: now };
     rev.done = outstanding(rev).length === 0; return rev;
   }
   function resolved(it) { return !it.flag || it.cleared || !!(it.redo && it.redo.passed); }
@@ -121,7 +121,7 @@
       var newer = (y._u || 0) > (x._u || 0) ? y : x, items = {}, k, A = x.items || {}, B = y.items || {};
       for (k in A) items[k] = A[k];
       for (k in B) { var p = items[k], q = B[k]; if (!p || (q._u || 0) > (p._u || 0)) { var keep = Object.assign({}, q); if (p && p.redo && p.redo.passed && !(keep.redo && keep.redo.passed) && !keep.required) keep.redo = p.redo; items[k] = keep; } else if (q.redo && q.redo.passed && !(p.redo && p.redo.passed) && !p.required) { items[k] = Object.assign({}, p, { redo: q.redo }); } }
-      var m = Object.assign({}, newer, { items: items, celebrated: !!(x.celebrated || y.celebrated) }); m.done = outstanding(m).length === 0; out[d] = m;
+      var m = Object.assign({}, newer, { items: items, celebrated: !!(x.celebrated || y.celebrated), endedByParent: !!(x.endedByParent || y.endedByParent) }); m.done = outstanding(m).length === 0; out[d] = m;
     }
     return out;
   }
