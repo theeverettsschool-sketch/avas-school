@@ -1,3 +1,23 @@
+# Ava's School v4 (Phase 2)
+
+## Required time per assignment
+- Parent → Settings → "Required time per assignment": minutes per block (defaults = schedule minutes; a block with two assignments splits them), plus an optional per-lesson override for any day. Stored as `settings.reqMins` / `settings.reqLesson` (new, additive).
+- Opening an assignment shows a countdown in the header. It counts only while the page is visible and focused and she is active (the "Still working?" check pauses it). Progress is saved in `reqt['lessonId|date']` (merged by max), so reloads, closing the app, or switching devices resume it.
+- Work finished early -> a "Work finished!" page with the countdown and optional review ideas; nothing is marked done until the countdown reaches 0. Leaving shows a friendly reminder (allowed; time is kept).
+- When both are met she is credited exactly X minutes: time entry `cr-<date>-<lessonId>` (src `credit`). A credit replaces the tap/timer time logged for the same lesson and date, so nothing is double counted, and the fixed id means two devices never credit twice.
+- Timer blocks (novel, PE, rotation) keep their wall-clock timer (the activity happens away from the screen) but use X as the target and credit exactly X.
+- PIN override: "Parent: count it as finished now" on the waiting page / "Parent: allow finishing now" on timer blocks, and "Mark finished" in the per-lesson list (credits X, no stars).
+- Lessons finished before this version are not re-gated.
+
+## Past days (catch-up)
+- New "📅 Past days" tab: every school day from the first school day to today, newest first, with school-day number, blocks finished and minutes. Opening a day shows that day's full schedule.
+- Work on a past day's lesson is credited to that lesson's own date (derived from its id), so that day can reach 270 minutes and count toward 180. Stars go to that date's week, unless that week is already marked paid: then they go to the current week (`origWeek` records the original). The streak is only advanced by today's work.
+- Parent → Settings → Calendar: "First school day" (`settings.startDate`, which the app now actually uses).
+
+## Safety
+- Same localStorage key; only new fields. Merge keeps `reqt`, prefers the finished record if one device finished a lesson. Old v3 devices keep all new data (unknown keys are merged, not dropped).
+- sw.js cache `ava-school-v4`; precache now bypasses the HTTP cache and network fetches revalidate, so updates arrive as one consistent set.
+
 # Ava's School v3 (Phase 1)
 
 ## Sync and saved-data safety
