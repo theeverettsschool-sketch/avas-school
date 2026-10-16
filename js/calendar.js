@@ -38,7 +38,7 @@
 
   function isSchoolDay(s, opts) {
     opts = opts || {};
-    if (s < (opts.start || START)) return false;
+    if (s < (opts.start || opts.startDate || START)) return false;
     if (opts.makeup && opts.makeup.indexOf(s) >= 0) return true;
     return offReason(s, opts.extraOff) === null;
   }
@@ -46,7 +46,7 @@
   // List of school days from start through `through` (or a safe max of 260 days / ~ end of July 2027).
   function schoolDays(opts) {
     opts = opts || {};
-    var start = opts.start || START;
+    var start = opts.start || opts.startDate || START;
     var through = opts.through || '2027-08-31';
     var out = [], d = start;
     while (d <= through) {
@@ -85,6 +85,8 @@
   // Week number (1-based) and weekday index (0=Mon..4=Fri) of the Nth *curriculum* day:
   // curriculum is built as weeks of 5 lessons (Mon..Fri roles). The Nth school day maps to
   // week ceil(N/5), role (N-1)%5. This keeps the lesson pattern intact across holidays.
+  // v4: the parent's first-school-day setting (settings.startDate), falling back to START
+  function startOf(opts) { return (opts && (opts.start || opts.startDate)) || START; }
   function lessonSlot(n) { return { week: Math.ceil(n / 5), role: (n - 1) % 5 }; }
 
   // Projection: given completed school days so far, what date do we hit 180?
@@ -101,7 +103,7 @@
     START: START, LAST_DAY: LAST_DAY, REQUIRED_DAYS: REQUIRED_DAYS, OFF_RANGES: OFF_RANGES,
     iso: iso, parse: parse, addDays: addDays, offReason: offReason, isSchoolDay: isSchoolDay,
     schoolDays: schoolDays, dayNumber: dayNumber, dateOfDay: dateOfDay, nextSchoolDay: nextSchoolDay,
-    pretty: pretty, short: short, lessonSlot: lessonSlot, projection: projection
+    pretty: pretty, short: short, startOf: startOf, lessonSlot: lessonSlot, projection: projection
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Cal = api;
 })(typeof window !== 'undefined' ? window : globalThis);

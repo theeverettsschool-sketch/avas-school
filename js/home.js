@@ -9,6 +9,7 @@
     return h('header', { class: 'topbar' }, h('div', { class: 'in' },
       h('a', { class: 'brand', href: '#/', style: { color: '#fff', textDecoration: 'none' } }, '✨ ', S().profile.name ? S().profile.name + '\'s School' : 'School'),
       h('span', { class: 'sp' }),
+      h('a', { class: 'pill' + (active === 'days' ? ' gold' : ''), id: 'dayspill', href: '#/days', 'aria-label': 'Past days and catch-up' }, '📅 Past days'),
       h('a', { class: 'pill gold', id: 'starpill', href: '#/stars', 'aria-label': 'Star bank' }, '⭐ ' + wk),
       h('a', { class: 'pill', href: '#/parent' }, '🔒 Parent')));
   }
@@ -71,23 +72,24 @@
 
   // one row of the timeline
   function blockRow(bs, today, isToday) {
-    var b = bs.b, st = S(), color = UI.subjectColor(b.subject), pct = Math.min(100, 100 * bs.mins / b.mins);
+    var b = bs.b, st = S(), color = UI.subjectColor(b.subject), req = bs.req !== undefined ? bs.req : b.mins, pct = req ? Math.min(100, 100 * bs.mins / req) : (bs.done ? 100 : 0);
     var timerL = b.items.length === 1 && b.items[0].type === 'timer' ? b.items[0] : null, T = timerL ? Player.Timers.get(timerL.id, today) : null, running = T && T.start;
-    var lessons = b.items.map(function (l) { var p = st.progress[l.id], done = p && p.done; return h('a', { class: 'bl-item' + (done ? ' done' : ''), href: '#/lesson/' + l.id, 'data-lesson': l.id }, h('span', { class: 'bl-chk', 'aria-hidden': 'true' }, done ? '✓' : ''), h('span', null, l.title), p && p.partial && !done ? h('span', { class: 'badge' }, 'in progress') : null); });
+    if (timerL) { var rq = Schedule.reqFor(timerL, today, st.settings); if (rq && !(st.progress[timerL.id] && st.progress[timerL.id].done)) timerL = Object.assign({}, timerL, { mins: rq }); }
+    var lessons = b.items.map(function (l) { var p = st.progress[l.id], done = p && p.done, rq = Schedule.reqFor(l, today, st.settings); return h('a', { class: 'bl-item' + (done ? ' done' : ''), href: '#/lesson/' + l.id, 'data-lesson': l.id }, h('span', { class: 'bl-chk', 'aria-hidden': 'true' }, done ? '✓' : ''), h('span', null, l.title), rq && !done ? h('span', { class: 'muted small' }, ' · ' + rq + ' min') : null, p && p.workDone && !done ? h('span', { class: 'badge warn' }, '⏳ timer not done') : p && p.partial && !done ? h('span', { class: 'badge' }, 'in progress') : null); });
     var actions = [];
     if (isToday && timerL && !bs.done) {
       actions.push(h('button', { class: 'btn small ' + (running ? 'ghost' : 'gold'), type: 'button', onclick: function (e) { e.preventDefault(); if (running) Player.Timers.pause(timerL.id); else Player.Timers.start(timerL, today); Home.render(); } }, running ? '⏸ Pause' : (T && T.acc ? '▶ Resume' : '▶ Start timer')));
       actions.push(h('span', { class: 'bl-clock', 'data-timer': timerL.id }, Player.fmtClock(Player.Timers.elapsed(T)) + ' / ' + timerL.mins + ':00'));
     } else if (isToday && bs.done && !bs.full && EXTRA_OK[b.key]) {
-      actions.push(h('a', { class: 'btn small ghost', href: '#/lesson/' + extraId(b.key, today) }, 'Keep practicing (' + (b.mins - bs.mins) + ' min to go)'));
+      actions.push(h('a', { class: 'btn small ghost', href: '#/lesson/' + extraId(b.key, today) }, 'Keep practicing (' + Math.max(0, req - bs.mins) + ' min to go)'));
     } else if (isToday && !bs.done) {
       var first = b.items.filter(function (l) { return !(st.progress[l.id] && st.progress[l.id].done); })[0];
-      if (first && !timerL) actions.push(h('a', { class: 'btn small gold', href: '#/lesson/' + first.id }, st.progress[first.id] && st.progress[first.id].partial ? 'Keep going' : 'Start'));
+      if (first && !timerL) actions.push(h('a', { class: 'btn small gold', href: '#/lesson/' + first.id }, st.progress[first.id] && (st.progress[first.id].partial || st.progress[first.id].workDone) ? 'Keep going' : 'Start'));
     }
     return h('div', { class: 'block' + (bs.full ? ' full' : bs.done ? ' done' : ''), style: { '--c': color } },
       h('div', { class: 'bl-time' }, b.start), h('div', { class: 'bl-icon', 'aria-hidden': 'true' }, b.icon),
-      h('div', { class: 'bl-main' }, h('div', { class: 'bl-head' }, h('b', null, b.name), h('span', { class: 'muted small' }, bs.mins + ' of ' + b.mins + ' min')),
-        h('div', { class: 'bl-bar', role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': b.mins, 'aria-valuenow': bs.mins, 'aria-label': b.name + ' minutes' }, h('i', { style: { width: pct + '%' } })),
+      h('div', { class: 'bl-main' }, h('div', { class: 'bl-head' }, h('b', null, b.name), h('span', { class: 'muted small' }, bs.mins + ' of ' + req + ' min')),
+        h('div', { class: 'bl-bar', role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': req, 'aria-valuenow': bs.mins, 'aria-label': b.name + ' minutes' }, h('i', { style: { width: pct + '%' } })),
         h('div', { class: 'bl-items' }, lessons), actions.length ? h('div', { class: 'bl-act' }, actions) : null),
       h('div', { class: 'bl-star' + (bs.full ? ' on' : ''), 'aria-label': bs.full ? 'Block finished' : 'Not finished yet' }, '★'));
   }
@@ -100,13 +102,13 @@
   // ---------- home ----------
   Home.render = function () {
     var st = S(), today = UI.today(), settings = st.settings, name = st.profile.name || 'there';
-    var isSchool = Cal.isSchoolDay(today, settings), beforeStart = today < Cal.START;
+    var START = Cal.startOf(settings), isSchool = Cal.isSchoolDay(today, settings), beforeStart = today < START;
     var weekMonday = Store.mondayOf(today), money = Store.weekMoney(weekMonday), cap = settings.weeklyCapUSD;
     var main = h('main', { class: 'wrap wide' }), ds = isSchool && !beforeStart ? Player.dayStatus(today) : null, target = Store.threshold();
     var mins = Store.dayMinutes(today), hours = Store.totalHours(), lvl = Player.level(hours), full = ds ? ds.blocks.filter(function (b) { return b.full; }).length : 0;
     var hero = h('section', { class: 'sky' },
       h('div', { class: 'sky-top' },
-        h('div', { class: 'sky-hi' }, h('h1', null, beforeStart ? 'School starts ' + Cal.pretty(Cal.START).replace(/^[A-Za-z]+, /, '') : (new Date().getHours() < 12 ? 'Good morning, ' : 'Hi, ') + name + '!'),
+        h('div', { class: 'sky-hi' }, h('h1', null, beforeStart ? 'School starts ' + Cal.pretty(START).replace(/^[A-Za-z]+, /, '') : (new Date().getHours() < 12 ? 'Good morning, ' : 'Hi, ') + name + '!'),
           h('p', { class: 'sub' }, Cal.pretty(today) + (ds ? ', school day ' + ds.day.n + ', week ' + ds.day.week : '')),
           ds ? h('p', { class: 'sub' }, full + ' of ' + ds.blocks.length + ' blocks finished') : null),
         ds ? h('div', { class: 'sky-ring' }, Pics.ring(mins / target, String(mins), 132, 'of ' + target + ' min')) : null),
@@ -119,7 +121,7 @@
     var run = Player.Timers.running(); if (run.length) main.appendChild(h('div', { class: 'fb info running' }, h('b', { class: 'h' }, '⏱️ Timer running'), run.map(function (t) { var L = Plan.find(t.id); return h('a', { href: '#/lesson/' + t.id, style: { display: 'block' } }, (L ? L.title : t.id) + ': ', h('span', { 'data-timer': t.id }, Player.fmtClock(Player.Timers.elapsed(t)) + ' / ' + Math.round(t.cap / 60) + ':00')); })));
 
     if (beforeStart) {
-      var first = Cal.START, fd = Plan.forDate(first, settings), fds = { day: fd, blocks: fd.blocks.filter(function (b) { return !b.brk; }).map(function (b) { return { b: b, mins: 0, done: false, full: false }; }) };
+      var first = START, fd = Plan.forDate(first, settings), fds = { day: fd, blocks: fd.blocks.filter(function (b) { return !b.brk; }).map(function (b) { return { b: b, mins: 0, done: false, full: false }; }) };
       main.appendChild(h('div', { class: 'card' }, h('h2', null, 'Here is a school day'), h('p', null, 'Every day has ' + Schedule.DAY_MINUTES + ' minutes of learning (4.5 hours, not counting lunch and breaks), in blocks like these. You can try the first lessons early for a head start.')));
       main.appendChild(timeline(fds, first, false));
     } else if (!isSchool) {
@@ -144,13 +146,46 @@
     var el = document.getElementById('starpill'); if (el) el.textContent = '⭐ ' + money.stars;
   };
   // update timer clocks without re-rendering (called every few seconds by app.js)
-  Home.tickTimers = function () { var nodes = document.querySelectorAll('[data-timer]'); for (var i = 0; i < nodes.length; i++) { var id = nodes[i].getAttribute('data-timer'), T = Player.Timers.get(id, UI.today()); if (T) nodes[i].textContent = Player.fmtClock(Player.Timers.elapsed(T)) + ' / ' + Math.round(T.cap / 60) + ':00'; } };
+  Home.tickTimers = function () { var nodes = document.querySelectorAll('[data-timer]'); for (var i = 0; i < nodes.length; i++) { var id = nodes[i].getAttribute('data-timer'), T = Player.Timers.all()[id]; if (T) nodes[i].textContent = Player.fmtClock(Player.Timers.elapsed(T)) + ' / ' + Math.round(T.cap / 60) + ':00'; } };
 
   function roadCard() {
     var cur = Plan.weekOf(UI.today(), S().settings) || 0, targetWeek = 19;
     return h('div', { class: 'card' }, h('h3', null, '🚀 Road to 5th grade'), h('p', null, cur >= targetWeek ? 'You are learning 5th-grade material now! Keep going.' : '5th-grade math, reading, science, and social studies start in week ' + targetWeek + ' (mid-March). Every block you finish is one step closer.'),
       h('div', { class: 'meter-bar', style: { background: '#dfe7f6' }, role: 'progressbar', 'aria-valuenow': cur, 'aria-valuemax': targetWeek, 'aria-label': 'Weeks until 5th grade' }, h('i', { style: { width: Math.min(100, 100 * Math.max(0, cur - 1) / (targetWeek - 1)) + '%' } })), h('p', { class: 'small muted' }, 'You are in week ' + cur + '. 5th grade starts in week ' + targetWeek + '.'));
   }
+
+  // ---------- v4: past days / catch-up ----------
+  // Every school day from the first day of school through today, newest first. Opening a day shows that day's full
+  // schedule; finishing its work credits time and stars to THAT date (see Player: c.date).
+  Home.days = function () {
+    var st = S(), today = UI.today(), settings = st.settings, start = Cal.startOf(settings), list = Cal.schoolDays(Object.assign({}, settings, { through: today })).reverse();
+    var main = h('main', { class: 'wrap wide' }, h('h1', { style: { marginTop: '18px' } }, '📅 Past days'),
+      h('p', { class: 'muted' }, 'Every school day since ' + Cal.pretty(start) + '. Missed one? Open it and do its blocks: the stars and minutes count for that day.'));
+    if (!list.length) main.appendChild(h('div', { class: 'card' }, h('p', null, 'School has not started yet. The first day is ' + Cal.pretty(start) + '.')));
+    var rows = list.map(function (d) {
+      var ds = Player.dayStatus(d), full = ds.blocks.filter(function (b) { return b.full; }).length, done = ds.blocks.filter(function (b) { return b.done; }).length, n = ds.blocks.length, mins = Store.dayMinutes(d), counts = Store.dayCounts(d);
+      var status = full === n && n ? h('span', { class: 'badge ok' }, 'Finished ★') : done || mins ? h('span', { class: 'badge' }, 'Started') : h('span', { class: 'badge warn' }, 'Not started');
+      return h('a', { class: 'tile day-row' + (full === n && n ? ' done' : ''), href: '#/day/' + d, 'data-day': d, style: { '--c': full === n && n ? 'var(--good)' : '#6b7cff' } },
+        h('div', { class: 't' }, h('span', { class: 'subj' }, 'School day ' + ds.day.n + (d === today ? ' · today' : '')), h('b', null, Cal.pretty(d)),
+          h('span', null, full + ' of ' + n + ' blocks finished · ' + mins + ' of ' + Store.threshold() + ' min' + (counts ? ' · counts toward 180 ✓' : ''))), status);
+    });
+    rows.forEach(function (r) { main.appendChild(r); });
+    main.appendChild(h('p', null, h('a', { class: 'btn ghost', href: '#/' }, 'Back to today')));
+    UI.render(topbar('days'), main);
+  };
+  Home.day = function (date) {
+    var st = S(), today = UI.today(), settings = st.settings;
+    if (!/^\d{4}-\d\d-\d\d$/.test(date) || date > today || !Cal.isSchoolDay(date, settings)) { UI.toast('That is not a school day you can open.'); return UI.go('/days'); }
+    if (date === today) return UI.go('/');
+    var ds = Player.dayStatus(date), full = ds.blocks.filter(function (b) { return b.full; }).length, mins = Store.dayMinutes(date), thr = Store.threshold();
+    var main = h('main', { class: 'wrap wide' },
+      h('section', { class: 'sky' }, h('div', { class: 'sky-top' }, h('div', { class: 'sky-hi' }, h('h1', null, Cal.pretty(date)), h('p', { class: 'sub' }, 'School day ' + ds.day.n + ', week ' + ds.day.week), h('p', { class: 'sub' }, full + ' of ' + ds.blocks.length + ' blocks finished')),
+        h('div', { class: 'sky-ring' }, Pics.ring(mins / thr, String(mins), 132, 'of ' + thr + ' min'))), constellation(ds.blocks)),
+      h('div', { class: 'fb info' }, h('b', { class: 'h' }, 'Catching up on a past day'), 'Everything you finish here counts for ' + Cal.pretty(date) + ': your minutes go to that day (so it can count toward the 180) and your stars go to that week. If that week was already paid, the stars go to this week instead.'),
+      h('h2', { class: 'tl-h' }, 'Schedule for ' + Cal.pretty(date)), timeline(ds, date, true),
+      h('p', null, h('a', { class: 'btn ghost', href: '#/days' }, '← All past days'), ' ', h('a', { class: 'btn ghost', href: '#/' }, 'Today')));
+    UI.render(topbar('days'), main);
+  };
 
   // ---------- star bank ----------
   Home.stars = function () {

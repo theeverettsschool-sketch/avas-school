@@ -15,6 +15,8 @@
       settings: { starsPerDollar: DEFAULT_RATE, weeklyCapUSD: DEFAULT_CAP, moneyV: 2, pinHash: '', startDate: Cal.START, extraOff: [], makeup: [], priorDays: 0, sound: true, readAloud: true,
         dayMinutes: 270,   // minutes that make a day count toward Georgia's 180 (4.5 hours; lunch and breaks not counted)
         dayStart: '08:30', // clock time the daily schedule starts
+        reqMins: {},       // v4: parent's required minutes per block key (missing = the block's schedule minutes)
+        reqLesson: {},     // v4: parent's per-lesson override, lessonId -> minutes
         _u: 0 },
       progress: {},   // lessonId -> {done, date, score, right, total, secs, tries, _u}
       skills: {},     // skill -> {right, wrong, _u}
@@ -29,6 +31,7 @@
       parentVerses: {}, // verseId -> NIV text pasted by parent
       badges: {},     // id -> {ts}
       readlog: {},    // lessonId -> {date, book, pages, summary, mins, ts, _u}  (v3 novel reading log)
+      reqt: {},       // v4: 'lessonId|date' -> {secs, _u}  seconds counted toward an assignment's required time
       streak: { last: '', n: 0, best: 0, _u: 0 },
       log: []         // small event log (last 200)
     };
@@ -67,11 +70,14 @@
   function onChange(f) { S.listeners.push(f); }
 
   // ---------- stars ----------
-  function addStars(stars, why, lesson, dateIso) {
+  // Stars for work done on a past school day go to THAT day's week, unless that week was already marked paid:
+  // then they go to the current week (todayIso) so she is never left unpaid for them. origWeek records where it came from.
+  function addStars(stars, why, lesson, dateIso, todayIso) {
     if (!stars) return null;
-    var date = dateIso || Cal.iso(new Date()), id = now() + '-' + Math.random().toString(36).slice(2, 6);
-    S.state.ledger[id] = { id: id, ts: now(), date: date, week: mondayOf(date), stars: stars, why: why, lesson: lesson || '' };
-    return S.state.ledger[id];
+    var date = dateIso || Cal.iso(new Date()), id = now() + '-' + Math.random().toString(36).slice(2, 6), week = mondayOf(date), e;
+    e = S.state.ledger[id] = { id: id, ts: now(), date: date, week: week, stars: stars, why: why, lesson: lesson || '' };
+    var p = S.state.payouts[week]; if (todayIso && todayIso > date && p && p.paidAt) { e.week = mondayOf(todayIso); e.origWeek = week; }
+    return e;
   }
   function weekStars(weekMonday) {
     var t = 0, L = S.state.ledger; for (var k in L) if (L[k].week === weekMonday) t += L[k].stars; return t;
@@ -121,7 +127,19 @@
   }
   function addTime(fields) { return logTime(newId(fields.src === 'parent' ? 'p' : 't'), fields); }
   function removeTime(id) { var e = S.state.time[id]; if (!e) return; e.secs = 0; e.removed = true; e._u = now(); syncLegacy(e.date); }
-  function timeEntries(filter) { var out = [], T = S.state.time || {}; for (var k in T) { var e = T[k]; if (!e.removed && e.secs > 0 && (!filter || filter(e))) out.push(e); } return out; }
+  // v4: when an assignment was credited (src 'credit', id cr-<date>-<lesson>), that credit REPLACES the tap/timer time
+  // logged for the same lesson on the same date, so nothing is counted twice (also across devices after a sync).
+  function creditId(dateIso, lessonId) { return 'cr-' + dateIso + '-' + lessonId; }
+  function shadowed(e, T) { return e.src !== 'credit' && e.src !== 'parent' && e.lesson && e.date && !!(T[creditId(e.date, e.lesson)] && !T[creditId(e.date, e.lesson)].removed && T[creditId(e.date, e.lesson)].secs > 0); }
+  function live(e, T) { return e && !e.removed && e.secs > 0 && !shadowed(e, T); }
+  function timeEntries(filter) { var out = [], T = S.state.time || {}; for (var k in T) { var e = T[k]; if (live(e, T) && (!filter || filter(e))) out.push(e); } return out; }
+  function creditLesson(lessonId, dateIso, mins, fields) {
+    fields = fields || {}; var id = creditId(dateIso, lessonId), e = S.state.time && S.state.time[id];
+    if (e && !e.removed && e.secs > 0) return e; // already credited (maybe on the other device): never twice
+    if (e && e.removed) { delete e.removed; }
+    return logTime(id, { date: dateIso, secs: Math.max(0, Math.round(mins * 60)), subject: fields.subject, block: fields.block, lesson: lessonId, src: 'credit', note: fields.by === 'parent' ? 'parent override' : '' });
+  }
+  function credited(lessonId, dateIso) { var e = (S.state.time || {})[creditId(dateIso, lessonId)]; return !!(e && !e.removed && e.secs > 0); }
   function timeSecs(dateIso, filter) { var t = 0; timeEntries(function (e) { return e.date === dateIso && (!filter || filter(e)); }).forEach(function (e) { t += e.secs; }); return t; }
   // Legacy attendance[date].mins is still written for older app versions. It holds (minutes from time entries) + (minutes
   // only an older version logged). attendance[date].tmins remembers the time-entry part, so the old-version part is
@@ -137,7 +155,7 @@
   // one pass over all time entries: date -> minutes (used by the yearly totals so they stay fast as entries pile up)
   function allDayMinutes() {
     var secs = {}, out = {}, T = S.state.time || {}, A = S.state.attendance || {}, d;
-    for (var k in T) { var e = T[k]; if (e && !e.removed && e.secs > 0 && e.date) secs[e.date] = (secs[e.date] || 0) + e.secs; }
+    for (var k in T) { var e = T[k]; if (live(e, T) && e.date) secs[e.date] = (secs[e.date] || 0) + e.secs; }
     for (d in A) out[d] = legacyExtra(A[d]);
     for (d in secs) out[d] = (out[d] || 0) + Math.floor(secs[d] / 60);
     return out;
@@ -180,7 +198,9 @@
     var m = migrate(JSON.parse(JSON.stringify(local))), r = migrate(JSON.parse(JSON.stringify(remote)));
     m.profile = (r.profile && r.profile.name && !m.profile.name) ? r.profile : m.profile;
     m.settings = (r.settings._u || 0) > (m.settings._u || 0) ? r.settings : m.settings;
-    var KNOWN = ['v', 'device', 'profile', 'settings', 'progress', 'skills', 'ledger', 'payouts', 'attendance', 'time', 'writing', 'spelling', 'bible', 'memory', 'parentVerses', 'badges', 'readlog', 'streak', 'log', '_saved'];
+    var KNOWN = ['v', 'device', 'profile', 'settings', 'progress', 'skills', 'ledger', 'payouts', 'attendance', 'time', 'writing', 'spelling', 'bible', 'memory', 'parentVerses', 'badges', 'readlog', 'reqt', 'streak', 'log', '_saved'];
+    // v4 required-time counters: per assignment keep the larger count (time only grows), never lose one
+    m.reqt = {}; [m.reqt, local.reqt || {}, remote.reqt || {}].forEach(function (x) { for (var q in x) { var c = m.reqt[q], e = x[q]; if (e && (!c || (+e.secs || 0) > (+c.secs || 0))) m.reqt[q] = e; } });
     ['progress', 'skills', 'payouts', 'writing', 'spelling', 'bible', 'memory', 'parentVerses', 'badges', 'readlog'].forEach(function (k) { m[k] = mergeMap(m[k], r[k]); });
     // keys this version does not know (added by a newer version): keep them, never drop them
     Object.keys(r).forEach(function (k) {
@@ -191,7 +211,7 @@
     // time entries: union by id; the same id is one growing session, so keep the larger amount
     m.time = {}; [local.time || {}, remote.time || {}].forEach(function (x) { for (var id in x) { var c = m.time[id], e = x[id]; if (!c) m.time[id] = e; else { var keep = (e.removed || c.removed) ? (((e._u || 0) > (c._u || 0) || ((e._u || 0) === (c._u || 0) && e.removed)) ? e : c) : (e.secs > c.secs ? e : c); m.time[id] = keep; } } });
     // progress: never let a merge un-complete a lesson, keep best score
-    for (var id in m.progress) { var lp = local.progress && local.progress[id], rp = remote.progress && remote.progress[id]; if ((lp && lp.done) || (rp && rp.done)) m.progress[id].done = true; }
+    for (var id in m.progress) { var lp = local.progress && local.progress[id], rp = remote.progress && remote.progress[id]; if ((lp && lp.done) || (rp && rp.done)) { if (!m.progress[id].done) m.progress[id] = (lp && lp.done) ? lp : rp; m.progress[id].done = true; } }
     // skills: counts only grow; take max of each side (same events seen on both devices) – safe & conservative
     for (var sk in m.skills) { var a = local.skills && local.skills[sk], b = remote.skills && remote.skills[sk]; if (a && b) { m.skills[sk] = { right: Math.max(a.right, b.right), wrong: Math.max(a.wrong, b.wrong), _u: Math.max(a._u || 0, b._u || 0) }; } }
     // ledger: union by unique id (stars are never lost or double-counted)
@@ -250,6 +270,7 @@
     recordSkill: recordSkill, weakSkills: weakSkills, markAttendance: markAttendance, daysCounted: daysCounted, totalHours: totalHours,
     newId: newId, logTime: logTime, addTime: addTime, removeTime: removeTime, timeEntries: timeEntries, timeSecs: timeSecs, dayMinutes: dayMinutes, dayCounts: dayCounts, threshold: threshold,
     datesWithTime: datesWithTime, totalMinutes: totalMinutes, minutesBySubject: minutesBySubject, blockSecs: blockSecs, DEFAULT_RATE: DEFAULT_RATE, DEFAULT_CAP: DEFAULT_CAP,
+    creditLesson: creditLesson, credited: credited, creditId: creditId,
     touchStreak: touchStreak, merge: merge, adopt: adopt, allDayMinutes: allDayMinutes, exportAll: exportAll, importAll: importAll, exportCSV: exportCSV, exportRange: exportRange, hashPin: hashPin,
     get state() { return S.state; }, set state(v) { S.state = v; }
   };

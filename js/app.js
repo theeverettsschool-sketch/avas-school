@@ -10,13 +10,15 @@
   UI.route('/', function () { if (!st.settings.pinHash || !Store.state.profile.name) return Home.setup(); Home.render(); });
   UI.route('/lesson/:id', function (id) { Player.start(id); });
   UI.route('/stars', function () { Home.stars(); });
+  UI.route('/days', function () { Home.days(); });
+  UI.route('/day/:date', function (d) { Home.day(d); });
   UI.route('/parent', function () { Parent.open(); });
   UI.route('/report', function () { Parent.report(); });
   UI.route('/hours', function () { Parent.hours(); });
 
   // End-of-week / end-of-month nudge to save a copy (parent-gated).
   Player.afterLesson = function (c) {
-    var s = Store.state, today = c.today, info = Plan.forDate(today, s.settings);
+    var s = Store.state, today = c.date, info = Plan.forDate(today, s.settings);
     var allDone = info.lessons.length && info.lessons.every(function (l) { return s.progress[l.id] && s.progress[l.id].done; });
     if (!allDone) return;
     var next = Cal.nextSchoolDay(Cal.addDays(today, 1), s.settings), endOfWeek = !next || Store.mondayOf(next) !== Store.mondayOf(today), endOfMonth = !next || next.slice(0, 7) !== today.slice(0, 7);
@@ -28,7 +30,7 @@
   };
 
   // timers (PE, novel, rotation) keep counting on every screen; refresh the clocks on Home
-  setInterval(function () { var stopped = Player.Timers.tick(); if (location.hash === '' || location.hash === '#/') { if (stopped) Home.render(); else Home.tickTimers(); } }, 5000);
+  setInterval(function () { var stopped = Player.Timers.tick(); if (location.hash === '' || location.hash === '#/') { if (stopped) Home.render(); else Home.tickTimers(); } else if (/^#\/day\//.test(location.hash)) Home.tickTimers(); }, 5000);
   document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden') { Player.Timers.running().forEach(Player.Timers.log); Store.save(); } });
 
   // sync: on open, when the tab comes back, and every few minutes

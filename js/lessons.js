@@ -39,14 +39,18 @@
   function makeCtx(lesson, opts) {
     var st = Store.state, prev = st.progress[lesson.id] || {};
     var practice = !!prev.done || !!(opts && opts.practice);
-    var c = { lesson: lesson, today: UI.today(), practice: practice, stars: 0, right1: 0, right2: 0, total: 0, wrong: 0, rushed: 0, rushWarned: false,
+    // v4: c.today = the real date; c.date = the school day this work is credited to (a past day's lesson keeps its own date)
+    var real = UI.today(), ad = root.Schedule && Schedule.dateForLesson ? Schedule.dateForLesson(lesson.id, st.settings) : null;
+    var c = { lesson: lesson, today: real, date: (ad && ad <= real) ? ad : real, practice: practice, stars: 0, right1: 0, right2: 0, total: 0, wrong: 0, rushed: 0, rushWarned: false,
       last: Date.now(), secs: 0, cap: CAPS[lesson.type] || 40, given: practice ? 0 : (prev.starsGiven || 0), color: UI.subjectColor(lesson.subject), missed: [], extra: {} };
     var part = (!practice && prev.partial) || null; if (part) { c.resume = part; c.right1 = part.right1 || 0; c.right2 = part.right2 || 0; c.total = part.total || 0; c.wrong = part.wrong || 0; c.rushed = part.rushed || 0; c.secs = part.secs || 0; c.extra = part.extra || {}; }
     if (lesson.extra) { // extra practice: at most 10 stars per block per day, however many extra sets she does
-      var pre = 'x-' + lesson.block + '-' + c.today + '-', earned = 0; for (var k in st.ledger) { var e = st.ledger[k]; if (e.lesson && e.lesson.indexOf(pre) === 0) earned += e.stars; }
+      var pre = 'x-' + lesson.block + '-' + c.date + '-', earned = 0; for (var k in st.ledger) { var e = st.ledger[k]; if (e.lesson && e.lesson.indexOf(pre) === 0) earned += e.stars; }
       c.cap = Math.max(0, CAPS.extra - earned) + c.given;
     }
     c.block = lesson.block || (root.Schedule && Schedule.SUBJECT_BLOCK[lesson.subject]) || lesson.subject;
+    c.reqMins = (!practice && root.Schedule && Schedule.reqFor) ? Schedule.reqFor(lesson, ad || c.date, st.settings) : 0;
+    c.reqKey = lesson.id + '|' + c.date;
     return c;
   }
   // ---- learning time: counts while the lesson is open and she is active; pauses after 3 idle minutes ----
@@ -55,16 +59,45 @@
   ['pointerdown', 'keydown', 'input', 'scroll', 'touchstart'].forEach(function (ev) { document.addEventListener(ev, activity, { passive: true, capture: true }); });
   function trackStart(c) {
     trackStop(); c.sess = Store.newId('ls'); c.sessSecs = 0; Track.c = c; Track.lastAct = Track.lastTick = Track.lastSave = Date.now();
-    Track.iv = setInterval(tick, 5000);
+    Track.iv = setInterval(tick, 1000); paintReq(c);
   }
-  function tick() {
-    var c = Track.c; if (!c) return; var n = Date.now(), dt = Math.min(10000, n - Track.lastTick); Track.lastTick = n;
-    if (document.visibilityState === 'hidden' || Track.asking) return;
-    if (n - Track.lastAct >= IDLE_MS) { stillWorking(); return; }
-    c.secs += dt / 1000; c.sessSecs += dt / 1000;
+  // ---- v4 required time: the assignment's countdown. Counts only while this page is visible AND focused AND she is
+  // active (the "Still working?" check pauses it). Saved in Store.state.reqt so a reload or another device resumes it.
+  function reqNeed(c) { return (c.reqMins || 0) * 60; }
+  function reqElapsed(c) {
+    if (c.lesson.type === 'timer') return Timers.elapsed(Timers.get(c.lesson.id, c.date));
+    var r = Store.state.reqt && Store.state.reqt[c.reqKey]; return r ? (+r.secs || 0) : 0;
+  }
+  function reqLeft(c) { return Math.max(0, reqNeed(c) - reqElapsed(c)); }
+  Player.reqLeft = reqLeft;
+  function addReq(c, secs) {
+    if (!c.reqMins || c.lesson.type === 'timer') return; var R = Store.state.reqt || (Store.state.reqt = {}), r = R[c.reqKey] || (R[c.reqKey] = { secs: 0, _u: 0 });
+    r.secs = Math.min(reqNeed(c), (+r.secs || 0) + secs); r._u = Store.now();
+  }
+  function paintReq(c) {
+    var left = reqLeft(c), txt = !c.reqMins ? '' : left > 0 ? '⏳ ' + fmtClock(left) + ' left' : '✅ Time done';
+    var el = document.getElementById('reqpill'); if (el) { el.textContent = txt; el.className = 'pill req' + (left > 0 ? '' : ' ok'); }
+    var big = document.getElementById('reqbig'); if (big) big.textContent = left > 0 ? fmtClock(left) : '0:00';
+  }
+  // test-only hook (localhost / file only): pretend `secs` of focused time passed on the open assignment
+  Player._advanceReq = function (secs) { if (!/^(localhost|127\.0\.0\.1)$/.test(location.hostname) || !Track.c) return false; addReq(Track.c, secs); tick(true); return reqLeft(Track.c); };
+  var blurred = false;
+  root.addEventListener && root.addEventListener('blur', function () { blurred = true; });
+  root.addEventListener && root.addEventListener('focus', function () { blurred = false; Track.lastTick = Date.now(); });
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') Track.lastTick = Date.now(); });
+  function tick(force) {
+    var c = Track.c; if (!c) return; var n = Date.now(), dt = Math.min(2000, n - Track.lastTick); Track.lastTick = n;
+    if (!force) {
+      if (document.visibilityState === 'hidden' || Track.asking) return;
+      if (n - Track.lastAct >= IDLE_MS) { stillWorking(); return; }
+      c.secs += dt / 1000; c.sessSecs += dt / 1000;
+      if (!blurred) addReq(c, dt / 1000);
+    }
+    paintReq(c);
+    if (c.held && reqLeft(c) <= 0) { var held = c.held; c.held = null; flushTime(c); finishLesson(c, held); return; }
     if (n - Track.lastSave > 15000) flushTime(c);
   }
-  function flushTime(c) { if (!c || !c.sess || c.sessSecs < 1) return; Store.logTime(c.sess, { date: c.today, secs: c.sessSecs, subject: c.lesson.subject, block: c.block, lesson: c.lesson.id, src: 'app' }); Track.lastSave = Date.now(); Store.save(); }
+  function flushTime(c) { if (!c || !c.sess || c.sessSecs < 1) return; Store.logTime(c.sess, { date: c.date, secs: c.sessSecs, subject: c.lesson.subject, block: c.block, lesson: c.lesson.id, src: 'app' }); Track.lastSave = Date.now(); Store.save(); }
   function trackStop() { if (Track.iv) clearInterval(Track.iv); Track.iv = null; if (Track.c) flushTime(Track.c); Track.c = null; }
   function stillWorking() {
     Track.asking = true;
@@ -78,10 +111,10 @@
   function touch(c) { activity(); }
   function award(c, n, why) {
     if (c.practice || n <= 0) return 0; n = Math.min(n, c.cap - c.given); if (n <= 0) return 0;
-    Store.addStars(n, why, c.lesson.id, c.today); c.given += n; c.stars += n; UI.sound('star'); updateStarPill(); return n;
+    Store.addStars(n, why, c.lesson.id, c.date, c.today); c.given += n; c.stars += n; UI.sound('star'); updateStarPill(); return n;
   }
   function savePartial(c, stage, extra) {
-    if (c.practice) return; var p = Store.state.progress[c.lesson.id] || (Store.state.progress[c.lesson.id] = { done: false, date: c.today });
+    if (c.practice) return; var p = Store.state.progress[c.lesson.id] || (Store.state.progress[c.lesson.id] = { done: false, date: c.date });
     p.partial = { stage: stage, right1: c.right1, right2: c.right2, total: c.total, wrong: c.wrong, rushed: c.rushed, secs: Math.round(c.secs), extra: Object.assign(c.extra, extra || {}) };
     p.starsGiven = c.given; p._u = Store.now(); flushTime(c); Store.save();
   }
@@ -95,9 +128,15 @@
     var head = h('header', { class: 'ph', style: { '--c': c.color } }, h('div', { class: 'in' },
       h('div', { class: 'ttl' }, UI.subjectName(lesson.subject) + (c.practice ? ' (practice: no stars)' : ''), h('small', null, lesson.title)),
       h('span', { class: 'pill', id: 'starpill' }, '⭐ ' + Store.weekStars(Store.mondayOf(UI.today()))),
-      h('button', { class: 'x', onclick: function () { UI.confirm('Leave this lesson?', 'Your place is saved. You can come back and keep going.', 'Leave', function () { UI.stopSpeak(); UI.go('/'); }, 'Stay'); } }, 'Exit')), dotsEl);
+      c.reqMins ? h('span', { class: 'pill req', id: 'reqpill', role: 'timer', 'aria-label': 'Time left on this assignment' }, '') : null,
+      h('button', { class: 'x', onclick: function () {
+        var left = c.reqMins ? reqLeft(c) : 0;
+        if (left > 0) UI.confirm('Your timer is not done yet ⏳', fmtClock(left) + ' left on this assignment. You can leave and come back: your work and time are saved. But it only counts as finished (with your stars and ' + c.reqMins + ' minutes) when the timer reaches 0:00 here.', 'Leave for now', function () { flushTime(c); UI.stopSpeak(); UI.go(backTo(c)); }, 'Stay');
+        else UI.confirm('Leave this lesson?', 'Your place is saved. You can come back and keep going.', 'Leave', function () { UI.stopSpeak(); UI.go(backTo(c)); }, 'Stay');
+      } }, 'Exit')), dotsEl);
     UI.render(head, stageEl);
   }
+  function backTo(c) { return c.date < c.today ? '/day/' + c.date : '/'; }
   function setDots(n, results) { dotsEl.innerHTML = ''; for (var i = 0; i < n; i++) dotsEl.appendChild(h('i', { class: results && results[i] === 1 ? 'on' : results && results[i] === 0 ? 'bad' : '' })); }
   function show(nodes, actions) {
     stageEl.innerHTML = ''; (function add(list) { [].concat(list).forEach(function (n) { if (Array.isArray(n)) add(n); else if (n) stageEl.appendChild(n); }); })(nodes);
@@ -173,7 +212,7 @@
     function onCheck() {
       touch(c); var elapsed = Date.now() - t0, correct;
       if (it.type === 'open') {
-        var txt = inputEl.value.trim(); var key = c.lesson.id + ':' + (o.key || 'o'); Store.state.writing[key] = { kind: 'open', q: it.q, text: txt, ts: Store.now(), date: c.today, status: 'submitted', lesson: c.lesson.id, subject: c.lesson.subject, _u: Store.now() };
+        var txt = inputEl.value.trim(); var key = c.lesson.id + ':' + (o.key || 'o'); Store.state.writing[key] = { kind: 'open', q: it.q, text: txt, ts: Store.now(), date: c.date, status: 'submitted', lesson: c.lesson.id, subject: c.lesson.subject, _u: Store.now() };
         award(c, 3, 'Written answer'); UI.commit(); fb.innerHTML = ''; fb.appendChild(h('div', { class: 'fb good' }, h('b', { class: 'h' }, 'Turned in!'), 'Your parent will read this. Nice thinking.')); inputEl.disabled = true; c.total++; c.right1++; return finish({ first: true });
       }
       if (it.type === 'choice') correct = sel === it.correct; else correct = it.check(inputEl.value);
@@ -230,37 +269,62 @@
 
   // ============================== finish / celebrate ==============================
   function badge(id, list) { if (!Store.state.badges[id]) { Store.state.badges[id] = { ts: Store.now(), _u: Store.now() }; list.push(id); } }
+  // v4: work finished before the required time is up -> save it and wait on this page (nothing is marked done yet)
+  function holdForTime(c, summary) {
+    var st = Store.state, L = c.lesson, p = st.progress[L.id] || (st.progress[L.id] = { done: false, date: c.date });
+    p.workDone = true; p.date = c.date; p.starsGiven = c.given;
+    p.hold = { summary: summary || {}, right1: c.right1, right2: c.right2, total: c.total, wrong: c.wrong, rushed: c.rushed, secs: Math.round(c.secs), extra: c.extra };
+    p._u = Store.now(); flushTime(c); UI.commit();
+    c.held = summary || {}; waitScreen(c);
+  }
+  function waitScreen(c) {
+    var L = c.lesson, parts = [];
+    if (L.learn && L.learn.length) parts.push(h('details', { class: 'card' }, h('summary', { style: { fontWeight: 700, cursor: 'pointer' } }, '📘 Review what you learned'), L.learn.map(function (x) { return h('div', null, x.h ? h('h4', null, x.h) : null, h('p', null, x.p)); }), UI.canSpeak() ? UI.speakBtn(readAloudOf(L.learn), 'Read it to me') : null));
+    if (L.passage && L.passage.length) parts.push(h('details', { class: 'card' }, h('summary', { style: { fontWeight: 700, cursor: 'pointer' } }, '🗣️ Read the passage out loud again'), passageNode(L), UI.canSpeak() ? UI.speakBtn(L.passage.join(' '), 'Read it with me') : null));
+    if (c.missed && c.missed.length) parts.push(h('details', { class: 'card' }, h('summary', { style: { fontWeight: 700, cursor: 'pointer' } }, '🔁 Look over the ones you missed (' + c.missed.length + ')'), c.missed.slice(0, 12).map(function (m) { var it = m.it || m.item || {}; return h('div', { class: 'fb info' }, h('b', { class: 'h' }, it.q || ''), it.why ? h('p', null, it.why) : null); })));
+    var extraIdea = { math: 'Make up 3 problems like today\'s on paper and solve them. Check each one a second way.', facts: 'Say your facts out loud, fastest first, then the tricky ones three times.', reading: 'Read your favorite paragraph out loud with expression, like an audiobook.', grammar: 'Write 3 sentences of your own that use today\'s rule.', writing: 'Re-read your writing out loud and fix one sentence to make it stronger.', science: 'Draw and label a picture of today\'s idea.', social: 'Draw a map or timeline about today\'s topic.', bible: 'Copy today\'s verse in your best handwriting.' }[c.block] || 'Tell a parent the three most important things you learned.';
+    parts.push(h('div', { class: 'card' }, h('h3', null, 'While the timer finishes (optional)'), h('ul', null, h('li', null, 'Look over your answers above.'), h('li', null, extraIdea), h('li', null, 'Read quietly from your chapter book. Tap the screen now and then so the clock knows you are here.'))));
+    show([h('div', { class: 'card req-wait' }, h('h2', null, '🎉 Work finished!'), h('p', null, 'Your answers are saved. This assignment is ' + c.reqMins + ' minutes, so stay on this page until the timer reaches 0:00. Then you get your stars and your ' + c.reqMins + ' minutes for ' + (c.date === c.today ? 'today' : Cal.pretty(c.date)) + '.'),
+      h('div', { class: 'req-big', id: 'reqbig', role: 'timer', 'aria-live': 'off' }, fmtClock(reqLeft(c))), h('p', { class: 'small muted', style: { textAlign: 'center' } }, 'The timer pauses if you switch apps, close the window, or the iPad goes to sleep.')),
+      parts,
+      h('p', { style: { textAlign: 'center' } }, h('button', { class: 'btn ghost small', type: 'button', onclick: function () { UI.requirePin(function () { c.override = true; var held = c.held || {}; c.held = null; finishLesson(c, held); }); } }, '🔒 Parent: count it as finished now'))]);
+    setDots(0); paintReq(c);
+  }
   function finishLesson(c, summary) {
+    if (c.reqMins && !c.practice && !c.override && reqLeft(c) > 1) return holdForTime(c, summary);
     touch(c); var L = c.lesson, st = Store.state, wasPractice = c.practice, newBadges = [];
     var total = c.total || 1, pct = Math.round(100 * c.right1 / total);
     if (!wasPractice) {
       award(c, 5, 'Finished the lesson'); if (c.total >= 5 && c.right1 === c.total) award(c, 5, 'Perfect lesson');
       var p = st.progress[L.id] || {}; var tries = (p.tries || 0) + 1;
-      st.progress[L.id] = { done: true, date: c.today, right: c.right1, r2: c.right2, total: c.total, secs: Math.round(c.secs), tries: tries, starsGiven: c.given, rushed: c.rushed, hints: c.extra.hints || 0, subject: L.subject, type: L.type, mastered: pct >= 80, _u: Store.now() };
+      st.progress[L.id] = { done: true, date: c.date, right: c.right1, r2: c.right2, total: c.total, secs: Math.round(c.secs), tries: tries, starsGiven: c.given, rushed: c.rushed, hints: c.extra.hints || 0, subject: L.subject, type: L.type, mastered: pct >= 80, _u: Store.now() };
       Object.assign(st.progress[L.id], summary || {});
-      Store.touchStreak(c.today); badge('first', newBadges); if (c.total >= 5 && c.right1 === c.total) badge('perfect', newBadges);
+      // v4: credit exactly the required minutes for this assignment (replaces the tap/timer time for it; fixed id, so two devices never double it)
+      if (c.reqMins) { Store.creditLesson(L.id, c.date, c.reqMins, { subject: L.subject, block: c.block, by: c.override ? 'parent' : 'app' }); st.progress[L.id].credit = c.reqMins; if (c.override) st.progress[L.id].byParent = true; }
+      if (c.date === c.today) Store.touchStreak(c.date); badge('first', newBadges); if (c.total >= 5 && c.right1 === c.total) badge('perfect', newBadges);
       var sn = st.streak.n; if (sn >= 3) badge('streak3', newBadges); if (sn >= 5) badge('streak5', newBadges); if (sn >= 10) badge('streak10', newBadges);
       if (L.type === 'write') badge('writer', newBadges);
       if (summary && summary.perfectSpelling) badge('speller', newBadges); if (summary && summary.verse) badge('verse', newBadges); if (summary && summary.speed) badge('speed', newBadges);
       var mm = 0; for (var k in st.progress) if (st.progress[k].type === 'math' && st.progress[k].mastered) mm++; if (mm >= 3) badge('mastered3', newBadges);
-      var info = Plan.forDate(c.today, st.settings); if (info.lessons.length && info.lessons.every(function (x) { return st.progress[x.id] && st.progress[x.id].done; })) badge('fullday', newBadges);
+      var info = Plan.forDate(c.date, st.settings); if (info.lessons.length && info.lessons.every(function (x) { return st.progress[x.id] && st.progress[x.id].done; })) badge('fullday', newBadges);
     }
-    trackStop(); Store.markAttendance(c.today, 0);
-    if (!wasPractice) { var hrs = Store.totalHours(); [[1, 'h1'], [10, 'h10'], [25, 'h25'], [50, 'h50'], [100, 'h100'], [250, 'h250'], [405, 'h405'], [810, 'h810']].forEach(function (x) { if (hrs >= x[0]) badge(x[1], newBadges); }); if (Object.keys(st.readlog || {}).length >= 10) badge('reader', newBadges); var ds = Player.dayStatus(c.today); if (ds.blocks.length && ds.blocks.every(function (b) { return b.full; })) badge('blocks', newBadges); }
+    trackStop(); Store.markAttendance(c.date, 0);
+    if (!wasPractice) { var hrs = Store.totalHours(); [[1, 'h1'], [10, 'h10'], [25, 'h25'], [50, 'h50'], [100, 'h100'], [250, 'h250'], [405, 'h405'], [810, 'h810']].forEach(function (x) { if (hrs >= x[0]) badge(x[1], newBadges); }); if (Object.keys(st.readlog || {}).length >= 10) badge('reader', newBadges); var ds = Player.dayStatus(c.date); if (ds.blocks.length && ds.blocks.every(function (b) { return b.full; })) badge('blocks', newBadges); }
     st.log.push({ ts: Store.now(), t: 'lesson', id: L.id, pct: pct, stars: c.stars }); if (st.log.length > 200) st.log.shift();
     UI.commit(); UI.sound('win');
-    var wk = Store.mondayOf(c.today), money = Store.weekMoney(wk);
-    var nextUp = Plan.forDate(c.today, st.settings).lessons.filter(function (x) { return x.type !== 'timer' && !(st.progress[x.id] && st.progress[x.id].done); })[0];
+    var wk = Store.mondayOf(c.date), money = Store.weekMoney(wk);
+    var nextUp = Plan.forDate(c.date, st.settings).lessons.filter(function (x) { return x.type !== 'timer' && !(st.progress[x.id] && st.progress[x.id].done); })[0];
     var showMastery = L.type === 'math' || L.type === 'lesson';
     var msg = pct >= 80 ? 'Mastered! You really know this.' : pct >= 60 ? 'Good effort. A little more practice will make it stick.' : 'This one is tricky. We will practice it again, and you will get it.';
     var node = h('div', { class: 'cele' }, h('div', { class: 'big' }, wasPractice ? '👏' : '🌟'), h('h1', null, wasPractice ? 'Practice complete' : 'Lesson complete!'),
       !wasPractice && h('div', { class: 'earned' }, '+' + c.stars + ' stars'),
+      !wasPractice && c.reqMins ? h('p', null, '⏱️ ' + c.reqMins + ' minutes counted for ' + (c.date === c.today ? 'today' : Cal.pretty(c.date)) + '.') : null,
       showMastery && c.total ? h('p', null, c.right1 + ' of ' + c.total + ' right on the first try (' + pct + '%). ', msg) : null,
       !wasPractice ? h('p', { class: 'muted' }, 'This week: ' + Store.weekStars(wk) + ' stars = ' + UI.money(money.usd) + ' of ' + UI.money(Store.state.settings.weeklyCapUSD) + (money.capped ? ' (you hit the weekly max!)' : '')) : h('p', { class: 'muted' }, 'Practice lessons do not earn stars, but they make you stronger.'),
       newBadges.length ? h('div', { class: 'card' }, h('h3', null, 'New badge' + (newBadges.length > 1 ? 's' : '') + '!'), newBadges.map(function (b) { var B = Player.BADGES[b]; return h('p', null, h('span', { style: { fontSize: '2rem' } }, B.e + ' '), h('b', null, B.n), ' ' + B.d); })) : null,
       h('div', { class: 'row', style: { justifyContent: 'center', marginTop: '14px' } },
         nextUp ? btn('Next lesson: ' + nextUp.title, function () { UI.go('/lesson/' + nextUp.id); }, 'gold') : null,
-        btn(nextUp ? 'Back to today' : 'Back to home', function () { UI.go('/'); }, nextUp ? 'ghost' : 'gold')));
+        btn(c.date < c.today ? 'Back to ' + Cal.pretty(c.date) : nextUp ? 'Back to today' : 'Back to home', function () { UI.go(backTo(c)); }, nextUp ? 'ghost' : 'gold')));
     show(node); setDots(0); if (!wasPractice && root.Fx) Fx.confetti(newBadges.length ? 160 : 90);
     if (!wasPractice && Player.afterLesson) Player.afterLesson(c);
   }
@@ -268,7 +332,7 @@
   // ============================== MATH ==============================
   function hashStr(s) { var x = 5381; for (var i = 0; i < s.length; i++) x = ((x << 5) + x + s.charCodeAt(i)) >>> 0; return x; }
   function startMath(L, c) {
-    var seedBase = c.extra.seed || (hashStr(L.id + c.today) % 100000 + 1); c.extra.seed = seedBase;
+    var seedBase = c.extra.seed || (hashStr(L.id + c.date) % 100000 + 1); c.extra.seed = seedBase;
     var topics = L.topics, per = Math.ceil(L.count / topics.length), problems = [];
     topics.forEach(function (t, ti) { Gen.make(t, per, seedBase + ti * 17).forEach(function (p) { problems.push(p); }); });
     problems = problems.slice(0, L.count); if (L.challenge || L.review) { problems = shuffleSeeded(problems, seedBase); }
@@ -281,7 +345,7 @@
         show([h('div', { class: 'demo' }, h('span', { class: 'tag' }, 'Watch me do one'), h('div', { class: 'q' }, demo.q), dpic ? h('div', { class: 'pic' }, dpic) : null, reveal), h('p', { class: 'muted small' }, 'Tip: grab scratch paper and copy each step as I go.')], [nb]);
       });
       stages.push(function (next) {
-        var tp = Gen.make(topics[0], 1, hashStr('together' + L.id + c.today) % 100000 + 11)[0]; setDots(1);
+        var tp = Gen.make(topics[0], 1, hashStr('together' + L.id + c.date) % 100000 + 11)[0]; setDots(1);
         var steps = tp.steps.slice(), fbwrap = h('div');
         askItem(c, tp, { mode: 'together', first: 0, second: 0, stage: 'together', done: function () { next(); }, nextLabel: 'Got it! On to my turn' });
       });
@@ -372,7 +436,7 @@
   function labStage(c, lab, next) {
     var ta = h('textarea', { class: 'ans', 'aria-label': 'What did you notice?', autocapitalize: 'sentences', placeholder: 'Write 2 or 3 sentences about what happened.' }), wc = h('div', { class: 'small muted' }, '0 / 12 words'),
       later = h('input', { type: 'checkbox', id: 'later' }), go = btn('Save and continue', function () {
-        var txt = ta.value.trim(); if (UI.wordCount(txt) >= 12) { Store.state.writing[c.lesson.id + ':lab'] = { kind: 'lab', q: lab.title + ': ' + lab.observe, text: txt, ts: Store.now(), date: c.today, status: 'submitted', lesson: c.lesson.id, subject: c.lesson.subject, _u: Store.now() }; award(c, 4, 'Lab notes'); c.extra.activity = true; }
+        var txt = ta.value.trim(); if (UI.wordCount(txt) >= 12) { Store.state.writing[c.lesson.id + ':lab'] = { kind: 'lab', q: lab.title + ': ' + lab.observe, text: txt, ts: Store.now(), date: c.date, status: 'submitted', lesson: c.lesson.id, subject: c.lesson.subject, _u: Store.now() }; award(c, 4, 'Lab notes'); c.extra.activity = true; }
         else c.extra.activity = false; next();
       }, 'gold'); go.disabled = true;
     function upd() { var n = UI.wordCount(ta.value); wc.textContent = n + ' / 12 words'; go.disabled = !(n >= 12 || later.checked); }
@@ -444,7 +508,7 @@
     stages.push(function (next) {
       var score = 0, missed = [], rows = words.map(function (w, idx) { var ok = UI.matchWord(w.w, answers[idx] || ''); if (ok) score++; else missed.push(w.w); return h('tr', null, h('td', null, ok ? '✅' : '❌'), h('td', null, h('b', null, w.w)), h('td', null, ok ? '' : 'You wrote: ' + (answers[idx] || '(blank)'))); });
       c.total = words.length; c.right1 = score; c.wrong = words.length - score; award(c, score * (L.pretest ? 1 : 2), L.pretest ? 'Spelling pretest' : 'Spelling test'); var perfect = score === words.length; if (perfect) award(c, L.pretest ? 3 : 10, L.pretest ? 'Knew every word on the pretest' : 'Perfect spelling test');
-      var sp = Store.state.spelling['list' + L.list] || (Store.state.spelling['list' + L.list] = { tests: [], struggled: [] }); sp.tests.push({ ts: Store.now(), date: c.today, score: score, total: words.length, missed: missed, answers: answers.slice(), pretest: !!L.pretest }); if (L.pretest) sp.struggled = missed.slice(); sp._u = Store.now(); c.extra.perfectSpelling = perfect && !L.pretest;
+      var sp = Store.state.spelling['list' + L.list] || (Store.state.spelling['list' + L.list] = { tests: [], struggled: [] }); sp.tests.push({ ts: Store.now(), date: c.date, score: score, total: words.length, missed: missed, answers: answers.slice(), pretest: !!L.pretest }); if (L.pretest) sp.struggled = missed.slice(); sp._u = Store.now(); c.extra.perfectSpelling = perfect && !L.pretest;
       show([h('div', { class: 'cele' }, h('div', { class: 'big' }, perfect ? '🏆' : L.pretest ? '🔍' : '📝'), h('h1', null, score + ' out of ' + words.length), h('p', null, L.pretest ? (perfect ? 'You already know them all! Keep them sharp this week.' : 'Study these this week: ' + missed.join(', ') + '.') : perfect ? 'A perfect test!' : 'Look at the ones you missed, and study them again this weekend.')), h('div', { class: 'card' }, h('table', null, h('tbody', null, rows)))], [btn('Finish', next, 'gold')]);
     });
     runStages(c, stages, function () { finishLesson(c, { perfectSpelling: c.extra.perfectSpelling, score: c.right1 }); });
@@ -470,7 +534,7 @@
       }
     ];
     runStages(c, stages, function () {
-      rec.status = rec.status === 'reviewed' ? 'reviewed' : 'submitted'; rec.submittedAt = Store.now(); rec.date = c.today; save(); award(c, 8, 'Turned in writing'); c.total = 1; c.right1 = 1;
+      rec.status = rec.status === 'reviewed' ? 'reviewed' : 'submitted'; rec.submittedAt = Store.now(); rec.date = c.date; save(); award(c, 8, 'Turned in writing'); c.total = 1; c.right1 = 1;
       if (L.publish) { var full = (rec.fields.final || ''); c.extra.publish = true; }
       finishLesson(c, {});
     });
@@ -501,7 +565,7 @@
       named('bq', function (next) { askSequence(c, L.questions, { stage: 'bq' }, next); }),
       function (next) { memoryStage(c, L, verseText, st, next); },
       function (next) {
-        var ta = h('textarea', { class: 'ans', 'aria-label': 'Your reflection', autocapitalize: 'sentences', placeholder: 'Write 1 or 2 sentences.' }), wc = h('div', { class: 'small muted' }, '0 / 8 words'), go = btn('Save my thoughts', function () { Store.state.bible[L.id] = { reflection: ta.value.trim(), ts: Store.now(), date: c.today, _u: Store.now() }; award(c, 3, 'Bible reflection'); next(); }, 'gold'); go.disabled = true;
+        var ta = h('textarea', { class: 'ans', 'aria-label': 'Your reflection', autocapitalize: 'sentences', placeholder: 'Write 1 or 2 sentences.' }), wc = h('div', { class: 'small muted' }, '0 / 8 words'), go = btn('Save my thoughts', function () { Store.state.bible[L.id] = { reflection: ta.value.trim(), ts: Store.now(), date: c.date, _u: Store.now() }; award(c, 3, 'Bible reflection'); next(); }, 'gold'); go.disabled = true;
         ta.addEventListener('input', function () { var n = UI.wordCount(ta.value); wc.textContent = n + ' / 8 words'; go.disabled = n < 8; });
         show([h('h2', null, 'Think about it'), h('div', { class: 'card' }, h('p', { style: { fontSize: '1.15rem' } }, L.reflect)), ta, wc], [go]);
       }
@@ -538,7 +602,7 @@
 
   // ============================== FLUENCY ==============================
   function startFluency(L, c) {
-    var rounds = 0, best = 0, bonusGiven = false, extraSpeed = false, MAX = 3, seed = hashStr(L.id + c.today);
+    var rounds = 0, best = 0, bonusGiven = false, extraSpeed = false, MAX = 3, seed = hashStr(L.id + c.date);
     var stages = [function (next) {
       show([h('div', { class: 'card' }, h('h2', null, 'Game day: fluency sprint ⚡'), h('p', null, 'You have ' + L.seconds + ' seconds. Answer as many as you can. This is the ONLY place in the app where speed earns stars.'), h('ul', null, h('li', null, 'You earn 1 star for every 4 right answers (up to 5).'), h('li', null, 'Hit ' + L.target + ' right with 90% accuracy to earn the 10-star Speed Bonus.'), h('li', null, 'Wrong answers do not lose stars, but they lower your accuracy, so do not guess wildly.')), h('p', { class: 'muted' }, 'You can play up to ' + MAX + ' rounds. Your best round counts.'))], [btn('Start round 1', next, 'gold')]);
     }];
@@ -590,7 +654,7 @@
         memoryStage(c, { verse: { ref: due } }, txt, 'letters', next);
       },
       function (next) {
-        var ta = h('textarea', { class: 'ans', 'aria-label': 'Your reflection', autocapitalize: 'sentences', placeholder: 'Write 2 or 3 sentences.' }), wc = h('div', { class: 'small muted' }, '0 / 10 words'), go = btn('Save my thoughts', function () { Store.state.bible[L.id] = { reflection: ta.value.trim(), ts: Store.now(), date: c.today, _u: Store.now() }; award(c, 3, 'Bible reflection'); next(); }, 'gold'); go.disabled = true;
+        var ta = h('textarea', { class: 'ans', 'aria-label': 'Your reflection', autocapitalize: 'sentences', placeholder: 'Write 2 or 3 sentences.' }), wc = h('div', { class: 'small muted' }, '0 / 10 words'), go = btn('Save my thoughts', function () { Store.state.bible[L.id] = { reflection: ta.value.trim(), ts: Store.now(), date: c.date, _u: Store.now() }; award(c, 3, 'Bible reflection'); next(); }, 'gold'); go.disabled = true;
         ta.addEventListener('input', function () { var n = UI.wordCount(ta.value); wc.textContent = n + ' / 10 words'; go.disabled = n < 10; });
         show([h('h2', null, 'Think about it'), h('div', { class: 'card' }, h('p', { style: { fontSize: '1.15rem' } }, L.reflect)), ta, wc, h('p', { class: 'muted small' }, 'End with a short prayer, out loud or in your heart.')], [go]);
       }
@@ -608,7 +672,7 @@
     show([timer, q, inp, score, h('p', { class: 'muted small', style: { textAlign: 'center' } }, 'Press Return after each answer.')]); setQ(); setTimeout(function () { inp.focus(); }, 60);
   }
   function startFacts(L, c) {
-    var seed = hashStr(L.id + c.today), stages = [
+    var seed = hashStr(L.id + c.date), stages = [
       function (next) { show([h('div', { class: 'card' }, h('h2', null, 'Facts sprint ⚡'), h('p', null, L.seconds + ' seconds. Answer as many facts as you can, then a few review problems from earlier lessons.'), h('ul', null, h('li', null, '1 star for every 5 right (up to 3).'), h('li', null, 'Hit ' + L.target + ' right with 90% accuracy for a 5-star speed bonus. Speed only counts in sprints.')))], [btn('Go!', next, 'gold')]); },
       function (next) {
         sprint(c, L, seed, function (right, wrong) {
@@ -632,7 +696,7 @@
     save: function (T) { try { localStorage.setItem(TKEY, JSON.stringify(T)); } catch (e) { } },
     get: function (id, date) { var T = Timers.all(), t = T[id]; return t && t.date === date ? t : null; },
     elapsed: function (t) { if (!t) return 0; var e = t.acc + (t.start ? (Date.now() - t.start) / 1000 : 0); return Math.min(e, t.cap); },
-    start: function (L, date) { var T = Timers.all(), t = T[L.id]; if (!t || t.date !== date) t = { id: L.id, date: date, acc: 0, start: null, cap: L.mins * 60, block: L.block, subject: L.subject, sess: 'tm-' + Store.state.device + '-' + L.id + '-' + date }; if (!t.start) t.start = Date.now(); T[L.id] = t; Timers.save(T); Timers.log(t); return t; },
+    start: function (L, date) { var T = Timers.all(), t = T[L.id]; if (!t || t.date !== date) t = { id: L.id, date: date, acc: 0, start: null, cap: L.mins * 60, block: L.block, subject: L.subject, sess: 'tm-' + Store.state.device + '-' + L.id + '-' + date }; if (t.cap < L.mins * 60) t.cap = L.mins * 60; if (!t.start) t.start = Date.now(); T[L.id] = t; Timers.save(T); Timers.log(t); return t; },
     pause: function (id) { var T = Timers.all(), t = T[id]; if (!t || !t.start) return t; t.acc = Timers.elapsed(t); t.start = null; Timers.save(T); Timers.log(t); return t; },
     extend: function (id, secs) { var T = Timers.all(), t = T[id]; if (!t) return; t.cap += secs; Timers.save(T); },
     log: function (t) { var e = Timers.elapsed(t); if (e >= 1) { Store.logTime(t.sess, { date: t.date, secs: e, subject: t.subject, block: t.block, lesson: t.id, src: 'timer' }); Store.save(); } },
@@ -645,35 +709,36 @@
   Player.fmtClock = fmtClock;
   function startTimer(L, c) {
     var st = Store.state, iv = null, prevBook = (function () { var R = st.readlog || {}, best = null; for (var k in R) if (!best || R[k].ts > best.ts) best = R[k]; return best ? best.book : ''; })();
-    var ring = h('div', { class: 'tring' }), clock = h('div', { class: 'tclock' }), startB = btn('Start', function () { Timers.start(L, c.today); paint(); }, 'gold'), pauseB = btn('Pause', function () { Timers.pause(L.id); paint(); }, 'ghost'),
-      moreB = btn('+5 minutes', function () { Timers.extend(L.id, 300); if (!(Timers.get(L.id, c.today) || {}).start) Timers.start(L, c.today); paint(); }, 'ghost small'), doneB = btn('Finish', finish, 'gold');
+    var ring = h('div', { class: 'tring' }), clock = h('div', { class: 'tclock' }), startB = btn('Start', function () { Timers.start(L, c.date); paint(); }, 'gold'), pauseB = btn('Pause', function () { Timers.pause(L.id); paint(); }, 'ghost'),
+      moreB = btn('+5 minutes', function () { Timers.extend(L.id, 300); if (!(Timers.get(L.id, c.date) || {}).start) Timers.start(L, c.date); paint(); }, 'ghost small'), doneB = btn('Finish', finish, 'gold');
     var book = h('input', { class: 'f-in', value: prevBook, 'aria-label': 'Book title', placeholder: 'Book title' }), pages = h('input', { class: 'f-in', 'aria-label': 'Pages or chapters read', placeholder: 'Pages or chapters (example: pages 34-52, or chapter 6)' }), sum = h('textarea', { class: 'f-in', rows: 2, 'aria-label': 'One-sentence summary', placeholder: 'One sentence: what happened in what you read?' }), note = h('textarea', { class: 'f-in', rows: 2, 'aria-label': 'Notes', placeholder: 'What did you make, see, or learn? (optional)' });
     function paint() {
-      var t = Timers.get(L.id, c.today), e = Timers.elapsed(t), cap = t ? t.cap : L.mins * 60, pct = Math.min(1, e / (L.mins * 60)), running = t && t.start;
+      var t = Timers.get(L.id, c.date), e = Timers.elapsed(t), cap = t ? t.cap : L.mins * 60, pct = Math.min(1, e / (L.mins * 60)), running = t && t.start;
       ring.innerHTML = ''; ring.appendChild(root.Pics ? Pics.ring(pct, L.icon || '⏱️', 180) : h('div'));
       clock.textContent = fmtClock(e) + ' of ' + L.mins + ':00'; startB.style.display = running ? 'none' : ''; startB.textContent = e > 0 ? 'Resume' : 'Start'; pauseB.style.display = running ? '' : 'none';
       doneB.disabled = e < L.mins * 60 - 1 && !doneB.dataset.early; c.secs = e;
       if (e >= cap && cap > L.mins * 60 - 1) { clock.textContent = '✅ ' + fmtClock(e) + ': time is up!'; }
+      paintReq(c);
     }
     function finish() {
-      var t = Timers.pause(L.id), e = Timers.elapsed(t || Timers.get(L.id, c.today)); c.secs = e; c.total = 0; if (e < L.mins * 60 - 1) c.cap = c.given; // finishing early: minutes count, stars do not
-      if (L.log) { if (!book.value.trim() || UI.wordCount(sum.value) < 5) { UI.toast('Fill in the book title and a one-sentence summary.'); return; } st.readlog = st.readlog || {}; st.readlog[L.id] = { id: L.id, date: c.today, book: book.value.trim(), pages: pages.value.trim(), summary: sum.value.trim(), mins: Math.round(e / 60), ts: Store.now(), _u: Store.now() }; }
-      if (L.note && note.value.trim()) { st.writing[L.id + ':note'] = { kind: 'note', q: L.title, text: note.value.trim(), ts: Store.now(), date: c.today, status: 'submitted', lesson: L.id, subject: L.subject, _u: Store.now() }; }
+      var t = Timers.pause(L.id), e = Timers.elapsed(t || Timers.get(L.id, c.date)); c.secs = e; c.total = 0; if (e < L.mins * 60 - 1) c.cap = c.given; // finishing early: minutes count, stars do not
+      if (L.log) { if (!book.value.trim() || UI.wordCount(sum.value) < 5) { UI.toast('Fill in the book title and a one-sentence summary.'); return; } st.readlog = st.readlog || {}; st.readlog[L.id] = { id: L.id, date: c.date, book: book.value.trim(), pages: pages.value.trim(), summary: sum.value.trim(), mins: Math.round(e / 60), ts: Store.now(), _u: Store.now() }; }
+      if (L.note && note.value.trim()) { st.writing[L.id + ':note'] = { kind: 'note', q: L.title, text: note.value.trim(), ts: Store.now(), date: c.date, status: 'submitted', lesson: L.id, subject: L.subject, _u: Store.now() }; }
       clearInterval(iv); finishLesson(c, { timer: true, mins: Math.round(e / 60) });
     }
     show([h('div', { class: 'card timer-card' }, h('h2', null, (L.icon ? L.icon + ' ' : '') + L.title), h('p', { style: { fontSize: '1.1rem' } }, L.how), h('div', { class: 'tbox' }, ring, clock), h('div', { class: 'row', style: { justifyContent: 'center' } }, startB, pauseB, moreB),
       h('p', { class: 'muted small', style: { textAlign: 'center' } }, 'The timer keeps running if you go back to Home. It stops by itself after ' + L.mins + ' minutes.')),
       L.log ? h('div', { class: 'card' }, h('h3', null, 'Reading log'), h('label', { class: 'f' }, 'Book'), book, h('label', { class: 'f' }, 'What I read today'), pages, h('label', { class: 'f' }, 'Summary'), sum) : null,
       L.note ? h('div', { class: 'card' }, h('h3', null, 'Notes'), note) : null,
-      h('details', { class: 'small muted' }, h('summary', null, 'Need to stop early?'), h('p', null, 'You can finish early. The minutes you did still count, but stars come when the timer is done.'), h('button', { class: 'btn ghost small', onclick: function () { doneB.dataset.early = '1'; paint(); } }, 'Let me finish early'))], [doneB]);
+      h('details', { class: 'small muted' }, h('summary', null, 'Need to stop early?'), c.reqMins ? h('p', null, 'Pause and come back later: the timer keeps what you did. This block counts as finished (with stars and ' + c.reqMins + ' minutes) when the timer is done.') : h('p', null, 'You can finish early. The minutes you did still count, but stars come when the timer is done.'), c.reqMins ? h('button', { class: 'btn ghost small', onclick: function () { UI.requirePin(function () { c.override = true; doneB.dataset.early = '1'; paint(); }); } }, '🔒 Parent: allow finishing now') : h('button', { class: 'btn ghost small', onclick: function () { doneB.dataset.early = '1'; paint(); } }, 'Let me finish early'))], [doneB]);
     paint(); iv = setInterval(function () { Timers.tick(); paint(); }, 1000); var pc = UI.cleanup; UI.cleanup = function () { clearInterval(iv); pc && pc(); };
-    if (!Timers.get(L.id, c.today)) setTimeout(function () { startB.focus(); }, 60);
+    if (!Timers.get(L.id, c.date)) setTimeout(function () { startB.focus(); }, 60);
   }
 
   // ============================== JOURNAL ==============================
   function startJournal(L, c) {
     var st = Store.state, rec = st.writing[L.id] || (st.writing[L.id] = { kind: 'journal', title: L.title, prompt: L.prompt, text: '', status: 'draft', ts: Store.now(), lesson: L.id, _u: 0 });
-    var ta = h('textarea', { class: 'ans journal', 'aria-label': 'Your journal entry', autocapitalize: 'sentences' }), wc = h('div', { class: 'small muted' }), go = btn('Turn it in', function () { rec.text = ta.value; rec.status = rec.status === 'reviewed' ? 'reviewed' : 'submitted'; rec.date = c.today; rec._u = Store.now(); award(c, 6, 'Journal entry'); c.total = 1; c.right1 = 1; finishLesson(c, {}); }, 'gold'), timer = null;
+    var ta = h('textarea', { class: 'ans journal', 'aria-label': 'Your journal entry', autocapitalize: 'sentences' }), wc = h('div', { class: 'small muted' }), go = btn('Turn it in', function () { rec.text = ta.value; rec.status = rec.status === 'reviewed' ? 'reviewed' : 'submitted'; rec.date = c.date; rec._u = Store.now(); award(c, 6, 'Journal entry'); c.total = 1; c.right1 = 1; finishLesson(c, {}); }, 'gold'), timer = null;
     ta.value = rec.text || '';
     function upd() { var n = UI.wordCount(ta.value); wc.textContent = n + ' words (at least ' + L.min + ')'; wc.style.color = n >= L.min ? 'var(--good)' : 'var(--muted)'; go.disabled = n < L.min; }
     ta.addEventListener('input', function () { upd(); clearTimeout(timer); timer = setTimeout(function () { rec.text = ta.value; rec._u = Store.now(); Store.save(); }, 600); });
@@ -686,16 +751,28 @@
   // Status of every block for a date: minutes logged and whether its lessons are done.
   Player.dayStatus = function (date) {
     var st = Store.state, day = Plan.forDate(date, st.settings), out = [];
-    day.blocks.forEach(function (b) { if (b.brk) return; var mins = Math.floor(Store.blockSecs(date, b.key) / 60), done = b.items.length > 0 && b.items.every(function (l) { return st.progress[l.id] && st.progress[l.id].done; }); out.push({ b: b, mins: mins, done: done, full: done && mins >= b.mins }); });
+    day.blocks.forEach(function (b) { if (b.brk) return; var mins = Math.floor(Store.blockSecs(date, b.key) / 60), done = b.items.length > 0 && b.items.every(function (l) { return st.progress[l.id] && st.progress[l.id].done; });
+      var req = Schedule.blockReq ? Schedule.blockReq(b, st.settings) : b.mins, cr = b.items.length > 0 && b.items.every(function (l) { return Store.credited(l.id, date); });
+      out.push({ b: b, mins: mins, req: req, done: done, full: done && (cr || mins >= req) }); });
     return { day: day, blocks: out, minutes: Store.dayMinutes(date) };
   };
 
   // ============================== entry ==============================
   Player.start = function (id, opts) {
     var L = Plan.find(id); if (!L) { UI.toast('That lesson is not available yet.'); return UI.go('/'); }
-    var c = makeCtx(L, opts || {}); frame(c);
-    if (L.type !== 'timer') trackStart(c);
+    var c = makeCtx(L, opts || {});
+    // timer blocks (novel, PE, rotation) use the parent's required minutes as their target
+    if (L.type === 'timer' && c.reqMins) { L = Object.assign({}, L, { mins: c.reqMins }); c.lesson = L; }
+    frame(c);
+    if (L.type !== 'timer') trackStart(c); else paintReq(c);
     UI.cleanup = function () { UI.stopSpeak(); trackStop(); };
+    // v4: work already finished, waiting for the required time -> straight back to the countdown page
+    var prev = Store.state.progress[L.id];
+    if (L.type !== 'timer' && prev && prev.workDone && !prev.done && !c.practice && c.reqMins) {
+      var hd = prev.hold || {}; c.right1 = hd.right1 || 0; c.right2 = hd.right2 || 0; c.total = hd.total || 0; c.wrong = hd.wrong || 0; c.rushed = hd.rushed || 0; c.secs = hd.secs || 0; c.extra = hd.extra || {};
+      if (reqLeft(c) <= 1) return finishLesson(c, hd.summary || {});
+      c.held = hd.summary || {}; return waitScreen(c);
+    }
     var run = { math: startMath, lesson: startLesson, 'spell-study': startSpellStudy, 'spell-test': startSpellTest, write: startWrite, bible: startBible, fluency: startFluency, devotion: startDevotion, facts: startFacts, timer: startTimer, journal: startJournal }[L.type];
     if (run) run(L, c); else { UI.toast('Unknown lesson type.'); UI.go('/'); }
   };

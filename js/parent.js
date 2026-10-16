@@ -159,9 +159,11 @@
     var thrIn = h('input', { class: 'f-in', type: 'number', min: 30, max: 600, value: Store.threshold(), style: { width: '110px' }, 'aria-label': 'Minutes for a day to count' }), startIn = h('input', { class: 'f-in', type: 'time', value: st.settings.dayStart || '08:30', style: { width: '140px' }, 'aria-label': 'School day start time' });
     box.appendChild(h('div', { class: 'card' }, h('h3', null, 'School day'), h('p', { class: 'small muted' }, 'A day counts toward the 180 when its learning time (app timers + lessons + minutes you add) reaches this many minutes. Georgia home study requires 4.5 hours (270 minutes) a day.'),
       h('div', { class: 'row' }, h('label', null, 'Minutes for a day to count: '), thrIn, h('label', null, 'Day starts at: '), startIn, h('button', { class: 'btn small', onclick: function () { st.settings.dayMinutes = Math.max(30, Math.min(600, Math.round(+thrIn.value || 270))); if (/^\d{2}:\d{2}$/.test(startIn.value)) st.settings.dayStart = startIn.value; st.settings._u = Store.now(); UI.commit(); UI.toast('Saved.'); Parent.render(); } }, 'Save'))));
+    box.appendChild(reqTimeCard());
     // calendar
     var prior = h('input', { class: 'f-in', type: 'number', min: 0, max: 180, value: st.settings.priorDays || 0, style: { width: '110px' }, 'aria-label': 'School days already completed' }), off = h('input', { class: 'f-in', type: 'date', 'aria-label': 'Extra day off' }), mk = h('input', { class: 'f-in', type: 'date', 'aria-label': 'Make-up school day' });
-    box.appendChild(h('div', { class: 'card' }, h('h3', null, 'Calendar'), h('p', { class: 'small muted' }, 'The app follows the official Fulton County 2026-27 calendar (breaks and holidays are already off). Her first day is ' + Cal.pretty(Cal.START) + '.'),
+    box.appendChild(h('div', { class: 'card' }, h('h3', null, 'Calendar'), h('p', { class: 'small muted' }, 'The app follows the official Fulton County 2026-27 calendar (breaks and holidays are already off). Her first day is ' + Cal.pretty(Cal.startOf(st.settings)) + '.'),
+      h('label', { class: 'f' }, 'First school day (the Past days tab lists every school day from here)'), (function () { var sd = h('input', { class: 'f-in', type: 'date', value: Cal.startOf(st.settings), style: { width: '180px' }, 'aria-label': 'First school day' }); return h('div', { class: 'row' }, sd, h('button', { class: 'btn small', onclick: function () { if (!/^\d{4}-\d\d-\d\d$/.test(sd.value)) return UI.toast('Pick a date.'); var go = function () { st.settings.startDate = sd.value; st.settings._u = Store.now(); UI.commit(); UI.toast('First school day saved.'); Parent.render(); }; if (sd.value === Cal.startOf(st.settings)) return go(); UI.confirm('Change the first school day?', 'Lessons follow the school-day number, so changing this moves which lessons belong to which date. Finished lessons stay finished and minutes already logged stay on their dates.', 'Change it', go); } }, 'Save')); })(),
       h('label', { class: 'f' }, 'School days already completed before ' + Cal.START + ' (this home-study year)'), h('div', { class: 'row' }, prior, h('button', { class: 'btn small', onclick: function () { st.settings.priorDays = Math.max(0, +prior.value || 0); st.settings._u = Store.now(); UI.commit(); UI.toast('Saved.'); Parent.render(); } }, 'Save')),
       h('label', { class: 'f' }, 'Add a day off (sick day, trip)'), h('div', { class: 'row' }, off, h('button', { class: 'btn small', onclick: function () { if (off.value) { st.settings.extraOff = (st.settings.extraOff || []).concat([off.value]); st.settings._u = Store.now(); UI.commit(); Parent.render(); } } }, 'Add')),
       h('label', { class: 'f' }, 'Add a make-up school day (Saturday, break day)'), h('div', { class: 'row' }, mk, h('button', { class: 'btn small', onclick: function () { if (mk.value) { st.settings.makeup = (st.settings.makeup || []).concat([mk.value]); st.settings._u = Store.now(); UI.commit(); Parent.render(); } } }, 'Add')),
@@ -174,6 +176,42 @@
     box.appendChild(h('div', { class: 'card' }, h('h3', null, 'Reset'), h('p', { class: 'small muted' }, 'Erase everything on THIS device. If cloud sync is on, the cloud copy stays and this device will pull it back. Download a backup first.'), h('button', { class: 'btn small ghost', onclick: function () { UI.confirm('Erase this device?', 'Progress on this device will be removed. Make sure you have a backup.', 'Erase', function () { localStorage.removeItem('avaSchool.state.v1'); Store.state = Store.blank(); location.hash = '#/'; location.reload(); }); } }, 'Erase this device')));
     return box;
   }
+  // ============ v4: required time per assignment ============
+  function reqTimeCard() {
+    var st = S(), set = st.settings, blocks = Schedule.BLOCKS.filter(function (b) { return !b.brk; }), ins = {};
+    var rows = blocks.map(function (b) { var i = h('input', { class: 'f-in', type: 'number', min: 0, max: 240, value: Schedule.blockMins(b.key, set), style: { width: '90px' }, 'aria-label': 'Required minutes for ' + b.name, 'data-req': b.key }); ins[b.key] = i; return h('tr', null, h('td', null, (b.icon || '') + ' ' + b.name), h('td', null, i, ' min'), h('td', { class: 'muted small' }, 'schedule: ' + b.mins)); });
+    var total = blocks.reduce(function (t, b) { return t + Schedule.blockMins(b.key, set); }, 0);
+    var card = h('div', { class: 'card', id: 'req-card' }, h('h3', null, '⏱️ Required time per assignment'),
+      h('p', { class: 'small muted' }, 'When she opens an assignment, a countdown shows the time left. It counts only while the page is open and in front (it pauses when she switches apps, the window is hidden, the iPad sleeps, or the "Still working?" check is up). The assignment counts as finished only when her work is done AND the countdown reaches 0. Then she is credited exactly that many minutes for that day. If a block has two assignments (grammar + spelling), its minutes are split between them. 0 = no required time.'),
+      h('table', null, h('tbody', null, rows)), h('p', { class: 'small' }, 'Total: ' + total + ' min a day' + (total < Store.threshold() ? ' (less than the ' + Store.threshold() + ' minutes a day needs to count; she can top up with Keep practicing or you can add minutes)' : '') + '.'),
+      h('div', { class: 'row' }, h('button', { class: 'btn small gold', onclick: function () { var o = {}; blocks.forEach(function (b) { var v = Math.round(+ins[b.key].value); if (ins[b.key].value !== '' && v >= 0 && v <= 240 && v !== b.mins) o[b.key] = v; }); set.reqMins = o; set._u = Store.now(); UI.commit(); UI.toast('Required times saved.'); Parent.render(); } }, 'Save block times'),
+        h('button', { class: 'btn small ghost', onclick: function () { set.reqMins = {}; set._u = Store.now(); UI.commit(); UI.toast('Back to the schedule minutes.'); Parent.render(); } }, 'Reset to schedule')));
+    // per-lesson override + parent "count it as finished"
+    var dIn = h('input', { class: 'f-in', type: 'date', value: Parent.reqDate || UI.today(), style: { width: '180px' }, 'aria-label': 'Day to adjust' }), list = h('div');
+    function paint() {
+      list.innerHTML = ''; var d = dIn.value; Parent.reqDate = d; var day = Plan.forDate(d, set);
+      if (!day.lessons.length) { list.appendChild(h('p', { class: 'muted small' }, 'Not a school day.')); return; }
+      list.appendChild(h('table', null, h('tbody', null, day.lessons.map(function (l) {
+        var p = st.progress[l.id], done = p && p.done, ov = set.reqLesson && set.reqLesson[l.id], i = h('input', { class: 'f-in', type: 'number', min: 0, max: 240, value: ov !== undefined ? ov : '', placeholder: String(Schedule.reqFor(l, d, Object.assign({}, set, { reqLesson: {} }))), style: { width: '80px' }, 'aria-label': 'Minutes for ' + l.title, 'data-req-lesson': l.id });
+        return h('tr', null, h('td', null, l.title, done ? h('span', { class: 'badge ok' }, 'done' + (Store.credited(l.id, d) ? ', ' + Math.round(Store.timeSecs(d, function (e) { return e.id === Store.creditId(d, l.id); }) / 60) + ' min credited' : '')) : p && p.workDone ? h('span', { class: 'badge warn' }, 'work done, timer not') : null),
+          h('td', null, i, h('button', { class: 'btn small ghost', onclick: function () { set.reqLesson = Object.assign({}, set.reqLesson || {}); if (i.value === '') delete set.reqLesson[l.id]; else set.reqLesson[l.id] = Math.max(0, Math.min(240, Math.round(+i.value))); set._u = Store.now(); UI.commit(); UI.toast('Saved for this lesson.'); paint(); } }, 'Set')),
+          h('td', null, done ? null : h('button', { class: 'btn small', onclick: function () { var mins = Schedule.reqFor(l, d, set); UI.confirm('Count it as finished?', l.title + ' (' + Cal.pretty(d) + ') will be marked finished and ' + mins + ' minutes credited to that day. No stars are added.', 'Yes, mark finished', function () { Parent.markComplete(l, d); paint(); }); } }, 'Mark finished')));
+      }))));
+    }
+    dIn.addEventListener('change', paint); paint();
+    card.appendChild(h('h4', { style: { marginTop: '16px' } }, 'One lesson different? (optional)'));
+    card.appendChild(h('p', { class: 'small muted' }, 'Pick a day, type minutes next to a lesson and tap Set (empty = use the block time shown in grey). "Mark finished" is your override: it marks the lesson done and credits its minutes to that day.'));
+    card.appendChild(h('div', { class: 'row' }, h('label', null, 'Day: '), dIn)); card.appendChild(list);
+    return card;
+  }
+  // parent override: mark finished + credit the required minutes to that date (no stars)
+  Parent.markComplete = function (l, d) {
+    var st = S(), p = st.progress[l.id] || {}, hd = p.hold || {}, mins = Schedule.reqFor(l, d, st.settings);
+    st.progress[l.id] = Object.assign({}, p, { done: true, date: d, right: hd.right1 || p.right || 0, total: hd.total || p.total || 0, secs: hd.secs || p.secs || 0, tries: (p.tries || 0) + 1, subject: l.subject, type: l.type, byParent: true, credit: mins, _u: Store.now() });
+    delete st.progress[l.id].partial; delete st.progress[l.id].hold; delete st.progress[l.id].workDone;
+    if (mins) Store.creditLesson(l.id, d, mins, { subject: l.subject, block: l.block, by: 'parent' });
+    Store.markAttendance(d, 0); UI.commit();
+  };
   function toggle(label, on, fn) { var cb = h('input', { type: 'checkbox' }); cb.checked = on; cb.addEventListener('change', function () { fn(cb.checked); }); return h('label', { class: 'check' }, cb, label); }
   function changePin() {
     var a = h('input', { class: 'f-in', type: 'password', inputmode: 'numeric', maxlength: 8, placeholder: 'New PIN', 'aria-label': 'New PIN' }), m = UI.modal(h('div', null, h('h2', null, 'New PIN'), a, h('div', { class: 'row', style: { marginTop: '10px', justifyContent: 'flex-end' } }, h('button', { class: 'btn', onclick: function () { if (!/^\d{4,8}$/.test(a.value)) return UI.toast('4 to 8 numbers.'); Store.hashPin(a.value).then(function (hh) { S().settings.pinHash = hh; S().settings._u = Store.now(); UI.commit(); m.close(); UI.toast('PIN changed.'); }); } }, 'Save'))));
