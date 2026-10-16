@@ -45,7 +45,7 @@
   function lessonWritings(L, st) {
     var out = [], W = st.writing || {}, id = L.id;
     Object.keys(W).forEach(function (k) {
-      if (k !== id && k.indexOf(id + ':') !== 0) return; var r = W[k]; if (!r || r.status === 'draft') return;
+      if ((k !== id && k.indexOf(id + ':') !== 0) || /:bp\d*$/.test(k)) return; var r = W[k]; if (!r || r.status === 'draft') return;
       if (r.kind === 'journal' || (k === id && L.type === 'journal')) out.push({ key: 'w:' + k, wkey: k, what: 'journal entry', prompt: r.prompt || L.prompt, text: r.text || '', min: L.min || 30 });
       else if (r.kind === 'write' || r.fields) { var F = L.fields || []; F.forEach(function (f) { if (r.fields && r.fields[f.id] !== undefined) out.push({ key: 'w:' + k + '#' + f.id, wkey: k, field: f.id, what: 'answer for "' + f.label.split(':')[0].split('(')[0].trim() + '"', prompt: f.label, text: r.fields[f.id] || '', min: f.min || 10 }); }); }
       else if (r.kind === 'open') { var op = (L.opens || []).filter(function (x) { return x.q === r.q; })[0]; out.push({ key: 'w:' + k, wkey: k, what: 'answer', prompt: r.q, text: r.text || '', min: (op && op.min) || 15 }); }

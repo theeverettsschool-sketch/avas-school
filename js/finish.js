@@ -11,7 +11,8 @@
     var href = '#/finish/' + date;
     if (left.length) return h('div', { class: 'card finish-card' }, h('button', { class: 'btn', type: 'button', disabled: true, id: 'finish-btn' }, 'Finish my day ✔'),
       h('p', { class: 'small muted' }, 'Finish every block first. Still to do: ' + left.map(function (b) { return b.b.name; }).join(', ') + '.'));
-    var label = rev && rev.done ? 'Day finished ✔ See my review' : rev ? 'Back to my review (' + Review.outstanding(rev).length + ' to fix)' : 'Finish my day ✔';
+    var T = Store.threshold(), mins = Store.dayMinutes(date), dayDone = rev && rev.done && (mins >= T || rev.endedByParent);
+    var label = dayDone ? 'School day done ✔ See my review' : rev && rev.done ? 'Continue: practice rounds (' + (T - mins) + ' min left)' : rev ? 'Back to my review (' + Review.outstanding(rev).length + ' to fix)' : 'Finish my day ✔';
     return h('div', { class: 'card finish-card' }, h('a', { class: 'btn gold big', href: href, id: 'finish-btn' }, label), h('p', { class: 'small muted' }, 'Checks every assignment from today. Anything below ' + Review.cfg().pct + '% or writing that needs work comes back for a quick fix.'));
   };
 
@@ -42,11 +43,18 @@
     var items = Object.keys(rev.items).map(function (k) { return rev.items[k]; }), out = Review.outstanding(rev), good = items.filter(function (i) { return !i.flag || Review.resolved(i); }), fix = items.filter(function (i) { return i.flag && !Review.resolved(i); });
     var main = h('main', { class: 'wrap', id: 'review' }, h('h1', { style: { marginTop: '18px' } }, 'My day review: ' + Cal.pretty(date)));
     if (checking) main.appendChild(h('div', { class: 'fb info' }, '✨ Checking your writing…'));
-    if (!out.length) {
-      main.appendChild(h('div', { class: 'cele', id: 'all-done' }, h('div', { class: 'big' }, '🎉'), h('h1', null, 'All done for today!'), h('p', null, 'Every assignment is checked and fixed. "Whatever you do, work at it with all your heart." (Colossians 3:23)'), h('a', { class: 'btn gold', href: backHref(date) }, 'Back')));
+    var T = Store.threshold(), mins = Store.dayMinutes(date);
+    if (!out.length && (mins >= T || rev.endedByParent)) {
+      main.appendChild(h('div', { class: 'cele', id: 'all-done' }, h('div', { class: 'big' }, '🎉'), h('h1', null, 'Your school day is done!'), h('p', null, mins + ' minutes of learning' + (rev.endedByParent && mins < T ? ' (your parent ended the day)' : '') + '. Every assignment is checked and fixed. "Whatever you do, work at it with all your heart." (Colossians 3:23)'), h('a', { class: 'btn gold', href: backHref(date) }, 'Back')));
       if (!rev.celebrated) { rev.celebrated = true; rev._u = Store.now(); UI.commit(); if (root.Fx) Fx.confetti(120); UI.sound && UI.sound('win'); }
+    } else if (!out.length) {
+      main.appendChild(h('div', { class: 'card', id: 'practice-card', style: { textAlign: 'center' } }, h('h2', null, '✅ Corrections done!'), h('p', null, 'You have ' + mins + ' of ' + T + ' minutes today. Practice rounds fill the last ' + (T - mins) + ' minutes, mixing subjects (your trickiest ones first). Small bonus stars for correct answers.'),
+        h('a', { class: 'btn gold big', href: '#/practice/' + date, id: 'practice-btn' }, '⭐ Start practice rounds (' + (T - mins) + ' min)'),
+        h('p', null, h('button', { class: 'btn ghost small', type: 'button', id: 'end-day-review', onclick: function () { UI.requirePin(function () { Player.endDay(date); }); } }, '🔒 Parent: end the day now'))));
     } else main.appendChild(h('div', { class: 'fb info' }, h('b', { class: 'h' }, out.length + ' thing' + (out.length > 1 ? 's' : '') + ' to fix'), 'Fix these and your day is finished. You can do them in any order.'));
     if (fix.length) main.appendChild(h('div', { class: 'card' }, h('h2', null, '🔧 To fix'), h('ul', { class: 'rv-list' }, fix.map(function (i) { return itemLine(i, date, rev); }))));
+    var PR = (S().practice || {})[date], pk = PR ? Object.keys(PR).filter(function (k) { return PR[k] && PR[k].total; }) : [];
+    if (pk.length) main.appendChild(h('div', { class: 'card' }, h('h2', null, '⭐ Bonus practice'), h('p', null, pk.map(function (k) { return UI.subjectName(Schedule.BLOCKS.filter(function (b) { return b.key === k; }).map(function (b) { return b.subject; })[0] || k) + ': ' + PR[k].right + ' of ' + PR[k].total + ' right'; }).join(' · '))));
     if (good.length) main.appendChild(h('div', { class: 'card' }, h('h2', null, '⭐ What\'s great'), h('ul', { class: 'rv-list' }, good.map(function (i) { return itemLine(i, date, rev); }))));
     if (!items.length) main.appendChild(h('div', { class: 'card' }, h('p', null, 'Nothing to check today (timer blocks only). Great job!')));
     main.appendChild(h('p', null, h('a', { class: 'btn ghost', href: backHref(date) }, '← Back to the schedule')));
@@ -58,6 +66,7 @@
     var rev = (S().reviews || {})[date], it = rev && rev.items[key]; if (!it) return UI.go('/finish/' + date);
     var ta = h('textarea', { class: 'ans journal', 'aria-label': 'Your writing', autocapitalize: 'sentences', id: 'fix-text' }), wc = h('div', { class: 'small muted' }), msg = h('div');
     ta.value = Review.textOf(it);
+    var stopT = Player.trackSimple(date, 'fix:' + it.lesson, it.subject, (Plan.find(it.lesson) || {}).block); UI.cleanup = stopT; // corrections time counts toward the day
     function upd() { var n = ta.value.trim().split(/\s+/).filter(Boolean).length; wc.textContent = n + ' words (at least ' + it.min + ')'; wc.style.color = n >= it.min ? 'var(--good)' : 'var(--muted)'; }
     ta.addEventListener('input', upd);
     var go = h('button', { class: 'btn gold', type: 'button', id: 'fix-check', onclick: function () {
@@ -90,6 +99,17 @@
       var act = (!i.flag || i.cleared || (i.redo && i.redo.passed)) ? h('button', { class: 'btn small ghost no-print', 'data-require': i.key, onclick: function () { Review.parentSet(d, i.key, 'require'); UI.commit(); Parent.render(); } }, 'Require redo') : h('button', { class: 'btn small no-print', 'data-clear': i.key, onclick: function () { Review.parentSet(d, i.key, 'clear'); UI.commit(); Parent.render(); } }, 'Clear flag');
       return h('tr', null, h('td', null, h('b', null, i.title), i.kind === 'write' ? h('div', { class: 'small muted' }, i.what) : null), h('td', null, res), h('td', null, st2, i.flag && !Review.resolved(i) ? h('div', { class: 'small' }, i.reasons.join(' ')) : null), h('td', null, act));
     }))));
+    // time: tracked (her real active time) vs credited (required minutes)
+    var lessonIds = {}; items.forEach(function (i) { lessonIds[i.lesson] = 1; }); Plan.forDate(d, st.settings).lessons.forEach(function (l) { lessonIds[l.id] = 1; });
+    // day breakdown: assignments / corrections / practice / parent-added vs target
+    var cat = { a: 0, c: 0, p: 0, x: 0 }; Store.timeEntries(function (e) { return e.date === d; }).forEach(function (e) { var l = String(e.lesson || ''); if (e.src === 'parent') cat.x += e.secs; else if (/^(redo|fix):/.test(l)) cat.c += e.secs; else if (/^prac:/.test(l)) cat.p += e.secs; else cat.a += e.secs; });
+    var mm = function (s) { return Math.round(s / 60) + ' min'; };
+    rep.appendChild(h('h4', null, 'Time today'));
+    rep.appendChild(h('table', { id: 'day-time' }, h('tbody', null, h('tr', null, h('td', null, 'Assignments (incl. timer blocks)'), h('td', null, mm(cat.a))), h('tr', null, h('td', null, 'Corrections (redos / try again)'), h('td', null, mm(cat.c))), h('tr', null, h('td', null, 'Practice rounds'), h('td', null, mm(cat.p))), cat.x ? h('tr', null, h('td', null, 'Added by you'), h('td', null, mm(cat.x))) : null,
+      h('tr', null, h('td', null, h('b', null, 'Total vs target')), h('td', null, h('b', null, Store.dayMinutes(d) + ' / ' + Store.threshold() + ' min' + (rev.endedByParent ? ' (ended early by parent)' : '')))))));
+    var T = st.time || {}, trows = Object.keys(lessonIds).map(function (id) { var tr = 0, cr = 0; for (var k in T) { var e = T[k]; if (!e || e.removed || e.date !== d || e.lesson !== id) continue; if (e.src === 'credit') cr += e.secs; else tr += e.secs; } return { id: id, tr: Math.round(tr / 60), cr: Math.round(cr / 60) }; }).filter(function (r) { return r.tr || r.cr; });
+    if (trows.length) { rep.appendChild(h('h4', null, 'Time: tracked vs credited')); rep.appendChild(h('table', null, h('thead', null, h('tr', null, ['Assignment', 'Tracked (active)', 'Credited'].map(function (x) { return h('th', null, x); }))), h('tbody', null, trows.map(function (r) { var L = Plan.find(r.id); return h('tr', null, h('td', null, L ? L.title : r.id), h('td', null, r.tr + ' min'), h('td', null, r.cr ? r.cr + ' min' : '-')); })))); }
+    var PR = (st.practice || {})[d]; if (PR) { var pk = Object.keys(PR).filter(function (k) { return PR[k] && PR[k].total; }); if (pk.length) { rep.appendChild(h('h4', null, 'Bonus practice')); rep.appendChild(h('p', null, pk.map(function (k) { return k + ': ' + PR[k].right + '/' + PR[k].total; }).join(' · '))); } }
     var W = items.filter(function (i) { return i.kind === 'write'; });
     if (W.length) { rep.appendChild(h('h4', null, 'Her writing')); W.forEach(function (i) { rep.appendChild(h('div', { class: 'rv-writing' }, h('b', null, i.title + ': ' + i.what), h('p', { class: 'small muted' }, i.prompt || ''), h('p', { style: { whiteSpace: 'pre-wrap' } }, Review.textOf(i)), i.ai ? h('p', { class: 'small' }, 'Writing helper: ' + i.ai.score + '/4. ' + (i.ai.strengths || '') + (i.ai.fixes.length ? ' Fixes: ' + i.ai.fixes.join('; ') : '')) : null, i.reasons.length ? h('p', { class: 'small' }, 'Checks: ' + i.reasons.join(' ')) : h('p', { class: 'small' }, 'Checks: looks good.'))); }); }
   };

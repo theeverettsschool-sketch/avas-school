@@ -17,6 +17,8 @@
         dayStart: '08:30', // clock time the daily schedule starts
         reqMins: {},       // v4: parent's required minutes per block key (missing = the block's schedule minutes)
         reqLesson: {},
+        reqOn: false,        // v5: 'Per-assignment timers' on/off. Default OFF: she moves on when done and real tracked time is logged
+        practiceStars: 1,    // v5: stars per correct Bonus practice item (max 10 per block a day; weekly cap still applies)
         reviewPct: 80,       // v5: Finish-my-day review: below this % an auto-graded assignment is flagged Redo
         redoBonus: true,     // v5: small bonus stars for fixing mistakes in a redo
         redoBonusStars: 1,   // v5: stars per fixed item (max 5 per redo)
@@ -36,6 +38,7 @@
       badges: {},     // id -> {ts}
       readlog: {},    // lessonId -> {date, book, pages, summary, mins, ts, _u}  (v3 novel reading log)
       reqt: {},
+      practice: {},   // v5: date -> block -> {right, total, _u}  Bonus practice results
       reviews: {},    // v5: date -> Finish-my-day review {date, ts, items:{key:{...}}, done, celebrated, _u}       // v4: 'lessonId|date' -> {secs, _u}  seconds counted toward an assignment's required time
       streak: { last: '', n: 0, best: 0, _u: 0 },
       log: []         // small event log (last 200)

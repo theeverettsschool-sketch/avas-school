@@ -72,7 +72,7 @@
 
   // one row of the timeline
   function blockRow(bs, today, isToday) {
-    var b = bs.b, st = S(), color = UI.subjectColor(b.subject), req = bs.req !== undefined ? bs.req : b.mins, pct = req ? Math.min(100, 100 * bs.mins / req) : (bs.done ? 100 : 0);
+    var b = bs.b, st = S(), color = UI.subjectColor(b.subject), req = bs.req || b.mins, pct = req ? Math.min(100, 100 * bs.mins / req) : (bs.done ? 100 : 0);
     var timerL = b.items.length === 1 && b.items[0].type === 'timer' ? b.items[0] : null, T = timerL ? Player.Timers.get(timerL.id, today) : null, running = T && T.start;
     if (timerL) { var rq = Schedule.reqFor(timerL, today, st.settings); if (rq && !(st.progress[timerL.id] && st.progress[timerL.id].done)) timerL = Object.assign({}, timerL, { mins: rq }); }
     var lessons = b.items.map(function (l) { var p = st.progress[l.id], done = p && p.done, rq = Schedule.reqFor(l, today, st.settings); return h('a', { class: 'bl-item' + (done ? ' done' : ''), href: '#/lesson/' + l.id, 'data-lesson': l.id }, h('span', { class: 'bl-chk', 'aria-hidden': 'true' }, done ? '✓' : ''), h('span', null, l.title), rq && !done ? h('span', { class: 'muted small' }, ' · ' + rq + ' min') : null, p && p.workDone && !done ? h('span', { class: 'badge warn' }, '⏳ timer not done') : p && p.partial && !done ? h('span', { class: 'badge' }, 'in progress') : null); });
