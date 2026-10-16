@@ -270,10 +270,30 @@
   // ============================== finish / celebrate ==============================
   function badge(id, list) { if (!Store.state.badges[id]) { Store.state.badges[id] = { ts: Store.now(), _u: Store.now() }; list.push(id); } }
   // v4: work finished before the required time is up -> save it and wait on this page (nothing is marked done yet)
+  function missedItems(c) { var out = []; (c.missed || []).forEach(function (m) { var x = m && m.item; if (x && x.kind !== 'open' && out.length < 15) { try { out.push(JSON.parse(JSON.stringify(x))); } catch (e) { } } }); return out; }
+  // v5: redo attempt from "Finish my day": only the missed items (math: a fresh similar set). No time is logged and no
+  // regular stars; a small bonus per fixed item if the parent allows it. Result is saved on the day's review.
+  Player.redo = function (id, date) {
+    var L = Plan.find(id), st = Store.state; if (!L) { UI.toast('That lesson is not available.'); return UI.go('/'); }
+    var items = Review.redoItems(L, st.progress[id] || {}, date);
+    if (!items.length) { UI.toast('Nothing to redo here.'); return UI.go('/finish/' + date); }
+    var c = makeCtx(L, { practice: true }); c.practice = true; c.date = date; c.redo = true; frame(c);
+    var hd = document.querySelector('.ph .ttl'); if (hd) hd.firstChild.textContent = 'Redo: ' + UI.subjectName(L.subject);
+    UI.cleanup = function () { UI.stopSpeak(); };
+    show([h('div', { class: 'card' }, h('h2', null, '🔁 Let\'s fix these'), h('p', null, items.length + ' question' + (items.length > 1 ? 's' : '') + ' to try again. Take your time and read each one carefully.'), L.learn && L.learn.length ? h('details', null, h('summary', { style: { fontWeight: 700, cursor: 'pointer' } }, 'Look back at the lesson first'), learnCards(c, L.learn)) : null)], [btn('Start', function () {
+      askSequence(c, items, { stage: 'redo', mode: 'practice' }, function () {
+        var res = Review.recordRedo(date, id, { right: c.right1 + c.right2, total: c.total });
+        UI.commit();
+        show([h('div', { class: 'cele' }, h('div', { class: 'big' }, res.passed ? '🌟' : '💪'), h('h1', null, res.passed ? 'Fixed!' : 'Good try!'), h('p', null, (c.right1 + c.right2) + ' of ' + c.total + ' right this time.' + (res.bonus ? ' +' + res.bonus + ' bonus stars for fixing mistakes.' : '')), res.passed ? null : h('p', null, 'You can try this one again after a short break.'),
+          h('div', { class: 'row', style: { justifyContent: 'center' } }, btn('Back to my review', function () { UI.go('/finish/' + date); }, 'gold')))]);
+        setDots(0); if (res.passed && root.Fx) Fx.confetti(60);
+      });
+    }, 'gold')]);
+  };
   function holdForTime(c, summary) {
     var st = Store.state, L = c.lesson, p = st.progress[L.id] || (st.progress[L.id] = { done: false, date: c.date });
     p.workDone = true; p.date = c.date; p.starsGiven = c.given;
-    p.hold = { summary: summary || {}, right1: c.right1, right2: c.right2, total: c.total, wrong: c.wrong, rushed: c.rushed, secs: Math.round(c.secs), extra: c.extra };
+    p.hold = { missed: missedItems(c), summary: summary || {}, right1: c.right1, right2: c.right2, total: c.total, wrong: c.wrong, rushed: c.rushed, secs: Math.round(c.secs), extra: c.extra };
     p._u = Store.now(); flushTime(c); UI.commit();
     c.held = summary || {}; waitScreen(c);
   }
@@ -299,6 +319,8 @@
       var p = st.progress[L.id] || {}; var tries = (p.tries || 0) + 1;
       st.progress[L.id] = { done: true, date: c.date, right: c.right1, r2: c.right2, total: c.total, secs: Math.round(c.secs), tries: tries, starsGiven: c.given, rushed: c.rushed, hints: c.extra.hints || 0, subject: L.subject, type: L.type, mastered: pct >= 80, _u: Store.now() };
       Object.assign(st.progress[L.id], summary || {});
+      // v5: remember the missed items so "Finish my day" can offer a redo of only those
+      var ms = missedItems(c); if (ms.length) st.progress[L.id].missed = ms;
       // v4: credit exactly the required minutes for this assignment (replaces the tap/timer time for it; fixed id, so two devices never double it)
       if (c.reqMins) { Store.creditLesson(L.id, c.date, c.reqMins, { subject: L.subject, block: c.block, by: c.override ? 'parent' : 'app' }); st.progress[L.id].credit = c.reqMins; if (c.override) st.progress[L.id].byParent = true; }
       if (c.date === c.today) Store.touchStreak(c.date); badge('first', newBadges); if (c.total >= 5 && c.right1 === c.total) badge('perfect', newBadges);
@@ -769,7 +791,7 @@
     // v4: work already finished, waiting for the required time -> straight back to the countdown page
     var prev = Store.state.progress[L.id];
     if (L.type !== 'timer' && prev && prev.workDone && !prev.done && !c.practice && c.reqMins) {
-      var hd = prev.hold || {}; c.right1 = hd.right1 || 0; c.right2 = hd.right2 || 0; c.total = hd.total || 0; c.wrong = hd.wrong || 0; c.rushed = hd.rushed || 0; c.secs = hd.secs || 0; c.extra = hd.extra || {};
+      var hd = prev.hold || {}; c.missed = (hd.missed || []).map(function (x) { return { item: x }; }); c.right1 = hd.right1 || 0; c.right2 = hd.right2 || 0; c.total = hd.total || 0; c.wrong = hd.wrong || 0; c.rushed = hd.rushed || 0; c.secs = hd.secs || 0; c.extra = hd.extra || {};
       if (reqLeft(c) <= 1) return finishLesson(c, hd.summary || {});
       c.held = hd.summary || {}; return waitScreen(c);
     }

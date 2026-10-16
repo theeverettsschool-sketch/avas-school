@@ -131,6 +131,7 @@
       if (ds.blocks.every(function (b) { return b.full; })) main.appendChild(h('div', { class: 'fb good' }, h('b', { class: 'h' }, 'Every block is finished! 🎉'), 'That is a full school day. Great job.'));
       main.appendChild(h('h2', { class: 'tl-h' }, 'Today\'s schedule'));
       main.appendChild(timeline(ds, today, true));
+      var fb = Finish.button(today); if (fb) main.appendChild(fb);
     }
 
     // missed core lessons (catch-up)
@@ -182,7 +183,7 @@
       h('section', { class: 'sky' }, h('div', { class: 'sky-top' }, h('div', { class: 'sky-hi' }, h('h1', null, Cal.pretty(date)), h('p', { class: 'sub' }, 'School day ' + ds.day.n + ', week ' + ds.day.week), h('p', { class: 'sub' }, full + ' of ' + ds.blocks.length + ' blocks finished')),
         h('div', { class: 'sky-ring' }, Pics.ring(mins / thr, String(mins), 132, 'of ' + thr + ' min'))), constellation(ds.blocks)),
       h('div', { class: 'fb info' }, h('b', { class: 'h' }, 'Catching up on a past day'), 'Everything you finish here counts for ' + Cal.pretty(date) + ': your minutes go to that day (so it can count toward the 180) and your stars go to that week. If that week was already paid, the stars go to this week instead.'),
-      h('h2', { class: 'tl-h' }, 'Schedule for ' + Cal.pretty(date)), timeline(ds, date, true),
+      h('h2', { class: 'tl-h' }, 'Schedule for ' + Cal.pretty(date)), timeline(ds, date, true), Finish.button(date),
       h('p', null, h('a', { class: 'btn ghost', href: '#/days' }, '← All past days'), ' ', h('a', { class: 'btn ghost', href: '#/' }, 'Today')));
     UI.render(topbar('days'), main);
   };

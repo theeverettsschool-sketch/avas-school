@@ -3,7 +3,7 @@
   'use strict';
   var h = UI.h, S = function () { return Store.state; };
   var Parent = { tab: 'overview' };
-  var TABS = [['overview', 'Overview'], ['review', 'Review'], ['progress', 'Progress'], ['pay', 'Stars & pay'], ['backup', 'Backup'], ['settings', 'Settings'], ['help', 'Plan & help']];
+  var TABS = [['overview', 'Overview'], ['review', 'Review'], ['progress', 'Progress'], ['pay', 'Stars & pay'], ['report', 'Daily report'], ['backup', 'Backup'], ['settings', 'Settings'], ['help', 'Plan & help']];
 
   Parent.backupDue = function () {
     var last = S().settings.lastExport || 0, any = Object.keys(S().progress).some(function (k) { return S().progress[k].done && S().progress[k]._u > last; });
@@ -20,7 +20,7 @@
       var badge = t[0] === 'review' && Parent.reviewCount() ? ' (' + Parent.reviewCount() + ')' : t[0] === 'backup' && Parent.backupDue() ? ' •' : '';
       return h('button', { role: 'tab', 'aria-selected': Parent.tab === t[0] ? 'true' : 'false', onclick: function () { Parent.tab = t[0]; Parent.render(); } }, t[1] + badge);
     }));
-    var fn = { overview: overview, review: review, progress: progress, pay: pay, backup: backup, settings: settings, help: help }[Parent.tab];
+    var fn = { report: function () { var b = h('div'); Finish.report(b); return b; }, overview: overview, review: review, progress: progress, pay: pay, backup: backup, settings: settings, help: help }[Parent.tab];
     body.appendChild(fn());
     UI.render(Home.topbar(), h('main', { class: 'wrap wide' }, h('h1', { style: { marginTop: '18px' } }, 'Parent area'), tabs, body));
   };
@@ -160,6 +160,7 @@
     box.appendChild(h('div', { class: 'card' }, h('h3', null, 'School day'), h('p', { class: 'small muted' }, 'A day counts toward the 180 when its learning time (app timers + lessons + minutes you add) reaches this many minutes. Georgia home study requires 4.5 hours (270 minutes) a day.'),
       h('div', { class: 'row' }, h('label', null, 'Minutes for a day to count: '), thrIn, h('label', null, 'Day starts at: '), startIn, h('button', { class: 'btn small', onclick: function () { st.settings.dayMinutes = Math.max(30, Math.min(600, Math.round(+thrIn.value || 270))); if (/^\d{2}:\d{2}$/.test(startIn.value)) st.settings.dayStart = startIn.value; st.settings._u = Store.now(); UI.commit(); UI.toast('Saved.'); Parent.render(); } }, 'Save'))));
     box.appendChild(reqTimeCard());
+    box.appendChild(Finish.settingsCard());
     // calendar
     var prior = h('input', { class: 'f-in', type: 'number', min: 0, max: 180, value: st.settings.priorDays || 0, style: { width: '110px' }, 'aria-label': 'School days already completed' }), off = h('input', { class: 'f-in', type: 'date', 'aria-label': 'Extra day off' }), mk = h('input', { class: 'f-in', type: 'date', 'aria-label': 'Make-up school day' });
     box.appendChild(h('div', { class: 'card' }, h('h3', null, 'Calendar'), h('p', { class: 'small muted' }, 'The app follows the official Fulton County 2026-27 calendar (breaks and holidays are already off). Her first day is ' + Cal.pretty(Cal.startOf(st.settings)) + '.'),
