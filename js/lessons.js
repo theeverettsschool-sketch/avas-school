@@ -573,7 +573,7 @@
     runStages(c, stages, function () { finishLesson(c, { verse: c.extra.verseOk && (st === 'recall' || st === 'letters') }); });
   }
   function memoryStage(c, L, verseText, stage, next) {
-    var ref = L.verse.ref, head = h('h2', null, 'Memory verse: ' + ref), nivText = Store.state.parentVerses && Store.state.parentVerses[ref];
+    var ref = L.verse.ref, stepName = { read: 'learn it', blanks1: 'fill 2 blanks', blanks2: 'fill more blanks', letters: 'first letters only', recall: 'say it from memory' }[stage], head = h('div', null, h('h2', null, 'Memory verse of the week: ' + ref), stepName ? h('p', { class: 'muted' }, 'Same verse all week on purpose, one step harder each day. Today: ' + stepName + '. Your reading above is new today.') : null), nivText = Store.state.parentVerses && Store.state.parentVerses[ref];
     var niv = nivText ? h('div', { class: 'fb info' }, h('b', { class: 'h' }, 'NIV (typed in by your parent)'), nivText) : null;
     function pass() { c.extra.verseOk = true; var m = Store.state.memory[ref] || { box: 0, due: '', _u: 0 }; m.box = Math.min(5, (m.box || 0) + 1); var days = [1, 3, 7, 14, 30][m.box - 1] || 30; m.due = Cal.addDays(c.today, days); m._u = Store.now(); Store.state.memory[ref] = m; award(c, 5, 'Memory verse'); }
     if (stage === 'read') {

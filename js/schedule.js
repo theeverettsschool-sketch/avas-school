@@ -58,6 +58,9 @@
     if (week > keys[keys.length - 1]) { var lo = keys.filter(function (k) { return k >= 5; }), arr = lo.length ? lo : keys; return b[arr[(week - arr[0]) % arr.length]]; }
     return null;
   }
+  // v4: after the year-long banks run out (summer make-up weeks), units repeat from week 5. Those days are labeled Review.
+  function wrapped(subject, week) { var b = C.bank && C.bank[subject]; return !!(b && !b[week] && Object.keys(b).length && week > Math.max.apply(null, Object.keys(b).map(Number))); }
+  function reviewLabel(l, subject, W) { if (l && wrapped(subject, W) && !/^Review/.test(l.title)) { l.title = 'Review: ' + l.title; l.review = true; } return l; }
   function written(week, role, subject, type) {
     var ids = (C.weeks[week] && C.weeks[week][role]) || [];
     for (var i = 0; i < ids.length; i++) { var l = C.lessons[ids[i]]; if (l && l.subject === subject && (!type || l.type === type)) return l; }
@@ -70,6 +73,7 @@
   function mark(l, block, core) { if (!l) return l; l.block = l.block || block; if (core !== undefined && l.core === undefined) l.core = core; return l; }
   // all written lessons count as core (they introduce new material)
   Object.keys(C.lessons).forEach(function (id) { var l = C.lessons[id]; if (l.core === undefined) l.core = true; l.block = l.block || SUBJECT_BLOCK[l.subject]; });
+  (function () { var seen = {}; Object.keys(C.weeks).map(Number).sort(function (a, b) { return a - b; }).forEach(function (w) { ROLES.forEach(function (r) { ((C.weeks[w] || {})[r] || []).forEach(function (id) { var l = C.lessons[id]; if (!l || l.subject !== 'bible' || !l.refs) return; var k = JSON.stringify(l.refs); if (seen[k] && !/^Review/.test(l.title)) { l.title = 'Review: ' + l.title; l.review = true; } seen[k] = 1; }); }); }); })();
 
   function vocabQs(u, S, n) {
     var V = u.vocab || [], out = [];
@@ -86,15 +90,19 @@
   function genBible(W, R, id) {
     var u = bank('bible', W); if (!u) return null; var d = u.days[ROLES.indexOf(R)] || u.days[0];
     var stage = { mon: 'read', tue: 'read', wed: 'blanks1', thu: 'letters', fri: 'recall' }[R];
-    return { id: id, subject: 'bible', type: 'devotion', block: 'bible', core: false, title: 'Devotion: ' + d.title, mins: 20, theme: u.theme, refs: d.refs, retell: d.retell, questions: d.questions, reflect: d.reflect, verse: { ref: u.verse.ref, why: u.verse.why, stage: stage } };
+    return reviewLabel({ id: id, subject: 'bible', type: 'devotion', block: 'bible', core: false, title: 'Devotion: ' + d.title, mins: 20, theme: u.theme, refs: d.refs, retell: d.retell, questions: d.questions, reflect: d.reflect, verse: { ref: u.verse.ref, why: u.verse.why, stage: stage } }, 'bible', W);
   }
   function mathTopicsThrough(W) { var seen = {}, out = []; for (var w = 1; w <= W; w++) { var m = Plan.MATH[w]; if (!m) continue; ROLES.forEach(function (r) { var s = m[r]; if (!s) return; var ts = typeof s === 'string' ? [s] : Array.isArray(s) ? s : s.review || s.test || []; ts.forEach(function (t) { if (!seen[t] && t.indexOf('fluency') !== 0) { seen[t] = 1; out.push(t); } }); }); } return out; }
   function genFacts(W, R, id) {
     var S = seeded(id), topics = mathTopicsThrough(Math.max(1, W - (R === 'mon' ? 1 : 0))), review = pick(topics, 6, S);
     return { id: id, subject: 'math', type: 'facts', block: 'facts', core: false, title: 'Facts sprint and mixed review', mins: 10, drill: Plan.drillFor(W), target: Math.min(26, 12 + Math.floor(W / 2)), seconds: 60, review: review, reviewCount: 5 };
   }
-  function genReading(W, R, id) {
+  function genReading(W, R, id) { return reviewLabel(genReading0(W, R, id), 'reading', W); }
+  function genReading0(W, R, id) {
     var u = bank('reading', W); if (!u) return null; var P = patternRole(W, R), S = seeded(id), t = 'Reading: ' + u.title;
+    if (P === 'thu' && !bank('reading', W - 1)) { // no earlier passage to re-read (week 1): vocabulary + evidence from this week instead of a copy of next week's re-read
+      return { id: id, subject: 'reading', type: 'lesson', block: 'reading', mins: 25, standard: u.skill, core: false, title: t + ': words and proof', passage: u.passage, reread: true, learn: [{ h: 'Words and proof', p: 'Re-read the passage. Match each word to its meaning, then prove one answer with a sentence from the text.' }], vocabCards: u.vocab, items: vocabQs(u, S, 4).concat(pick(u.items, 3, S)), opens: u.evidence.slice(-1).map(function (q) { return openItem(q + ' Copy a sentence from the passage as your proof.', 25); }) };
+    }
     var base = { id: id, subject: 'reading', type: 'lesson', block: 'reading', mins: 25, standard: u.skill, core: false };
     if (P === 'mon') return Object.assign(base, { core: true, title: t + ' (' + u.skill + ')', passage: u.passage, learn: u.learn, vocabCards: u.vocab, demo: u.demo, items: u.items.slice() });
     if (P === 'tue') return Object.assign(base, { title: t + ': words to know', passage: u.passage, reread: true, learn: [{ h: 'Words from the passage', p: 'Good readers figure out new words from the sentences around them. Re-read the passage, then match each word to its meaning.' }], vocabCards: u.vocab, items: vocabQs(u, S).concat(pick(u.items, 4, S)) });
@@ -103,7 +111,8 @@
     return Object.assign(base, { title: t + ': summary and quiz', passage: u.passage, reread: true, learn: [{ h: 'Summarize', p: 'A summary tells the most important ideas in your own words, in order, without small details or your opinion. Aim for 3 to 4 sentences.' }], items: pick(u.items, 6, S), opens: [openItem(u.summary, 40)] });
   }
   function grammarUnit(W) { return bank('grammar', W); }
-  function genGrammar(W, R, id) {
+  function genGrammar(W, R, id) { return reviewLabel(genGrammar0(W, R, id), 'grammar', W); }
+  function genGrammar0(W, R, id) {
     var u = grammarUnit(W); if (!u) return null; var P = patternRole(W, R), S = seeded(id), start = { mon: 0, tue: 8, wed: 16, thu: 4, fri: 12 }[P];
     var spiral = []; for (var w = W - 1; w >= Math.max(1, W - 3); w--) { var pu = grammarUnit(w); if (pu) spiral = spiral.concat(pu.items); }
     var base = { id: id, subject: 'grammar', type: 'lesson', block: 'grammar', mins: 15, standard: u.standard, core: false };
@@ -129,7 +138,8 @@
     while (out.length < 3 && tries++ < 80) { var f = S.pick(rules), m2 = f(w); if (m2 && m2 !== w && out.indexOf(m2) < 0 && /^[a-z'-]+$/i.test(m2)) out.push(m2); }
     return out;
   }
-  function genSpelling(W, R, id, key) {
+  function genSpelling(W, R, id, key) { return (C.spelling && C.spelling[W]) ? genSpelling0(W, R, id, key) : reviewLabel(genSpelling0(W, R, id, key), 'spelling', W); }
+  function genSpelling0(W, R, id, key) {
     var L = spellList(W); if (!L) return null; var S = seeded(id), words = L.words.map(function (x) { return { w: x[0], s: x[1], tip: x[2] || '' }; });
     var base = { id: id, subject: 'spelling', block: 'grammar', mins: 10, list: W, core: false };
     if (key === 'spell-pre') return Object.assign(base, { type: 'spell-test', pretest: true, title: 'Spelling pretest: ' + L.name, words: S.shuffle(words) });
@@ -141,7 +151,8 @@
     return Object.assign(base, { type: 'lesson', title: 'Spelling: choose the right spelling', learn: [{ h: 'This week: ' + L.name, p: L.rule }], items: pick(items, 10, S) });
   }
   function spellingKey(W, R) { return { mon: 'spell-pre', tue: 'spell-study', wed: 'spell-prac', thu: 'spell-check', fri: 'spell-test' }[R]; }
-  function genSci(subject, W, R, id) {
+  function genSci(subject, W, R, id) { return reviewLabel(genSci0(subject, W, R, id), subject, W); }
+  function genSci0(subject, W, R, id) {
     var u = bank(subject, W); if (!u) return null; var P = patternRole(W, R), S = seeded(id), sci = subject === 'science', nm = sci ? 'Science' : 'Social studies';
     var base = { id: id, subject: subject, type: 'lesson', block: subject, mins: 25, standard: u.standard, core: false };
     if (P === 'mon') return Object.assign(base, { core: true, title: nm + ': ' + u.title, passage: u.passage, learn: u.learn, vocabCards: u.vocab, demo: u.demo, items: u.items.slice(0, 6) });
@@ -153,11 +164,12 @@
   function journalPrompt(n) { var J = (C.prompts && C.prompts.journal) || []; return J.length ? J[(n - 1 + J.length) % J.length] : 'Write about something you learned this week and why it matters to you.'; }
   function genJournal(W, R, id) {
     var n = slotIndex(W, R);
-    return { id: id, subject: 'writing', type: 'journal', block: 'writing', core: false, mins: 25, title: 'Journal', prompt: journalPrompt(n), min: W < 10 ? 50 : W < 19 ? 70 : 90 };
+    var J = (C.prompts && C.prompts.journal) || [];
+    return { id: id, subject: 'writing', type: 'journal', block: 'writing', core: false, mins: 25, title: J.length && n > J.length ? 'Journal (Review: a prompt from earlier in the year)' : 'Journal', review: !!(J.length && n > J.length), prompt: journalPrompt(n), min: W < 10 ? 50 : W < 19 ? 70 : 90 };
   }
   function genProject(W, id) {
     var P = (C.projects || []).filter(function (p) { return W >= p.start && W < p.start + 4; })[0];
-    if (!P) { var F = C.projectFinale; return F ? Object.assign({ id: id, subject: 'writing', type: 'write', block: 'writing', core: true, mins: 25, project: 'Year-end celebration' }, F) : null; }
+    if (!P) { var F = C.projectFinale; if (!F) return null; var fin = Object.assign({ id: id, subject: 'writing', type: 'write', block: 'writing', core: true, mins: 25, project: 'Year-end celebration' }, F); var first = 0; for (var w = W - 1; w >= 5; w--) { if (!(C.projects || []).some(function (p) { return w >= p.start && w < p.start + 4; })) first = w; else break; } if (first) { fin.title = 'Review: ' + fin.title + ' (another favorite piece)'; fin.review = true; } return fin; }
     var k = W - P.start, st = P.stages[k];
     return { id: id, subject: 'writing', type: 'write', block: 'writing', core: true, mins: 25, project: P.name, title: 'Writing project: ' + st.title, intro: (k === 0 ? P.intro + ' ' : '') + st.intro, demo: st.demo, fields: st.fields, checklist: st.checklist, publish: !!st.publish, carryFrom: k > 0 ? 'w' + (W - 1) + '-thu-write' : null };
   }
@@ -246,7 +258,10 @@
     if (block === 'grammar') { var g = []; for (var w2 = 1; w2 <= W; w2++) { var gu = grammarUnit(w2); if (gu) g = g.concat(gu.items); } return Object.assign(base, { subject: 'grammar', type: 'lesson', title: 'Extra practice: grammar mix', learn: [], items: pick(g, 8, S) }); }
     if (block === 'science' || block === 'social') { var pool = poolFrom(block); return pool.length ? Object.assign(base, { subject: block, type: 'lesson', title: 'Extra practice: ' + (block === 'science' ? 'science' : 'social studies') + ' review', learn: [], items: pick(pool, 6, S) }) : null; }
     if (block === 'writing') return Object.assign(base, { subject: 'writing', type: 'journal', title: 'Free writing', prompt: journalPrompt(n + 60 + (+m[3]) * 7), min: 30 });
-    if (block === 'bible') { var bu = bank('bible', W) || bank('bible', 5); if (!bu) return null; var qs = []; bu.days.forEach(function (d) { qs = qs.concat(d.questions); }); return Object.assign(base, { subject: 'bible', type: 'lesson', title: 'Extra practice: this week\'s Bible stories', learn: [], items: pick(qs, 6, S) }); }
+    if (block === 'bible') { // review questions from THIS week's Bible readings so far (weeks 1-4: the written lessons; later: the reading plan)
+      var qs = [], R = s.role, upto = ROLES.indexOf(R); ROLES.forEach(function (r, i) { if (i > upto) return; var l = written(W, r, 'bible'); if (l && l.questions) qs = qs.concat(l.questions); });
+      var bu = bank('bible', W); if (!qs.length && bu) bu.days.forEach(function (d, i) { if (i <= upto) qs = qs.concat(d.questions); });
+      if (!qs.length) return null; return Object.assign(base, { subject: 'bible', type: 'lesson', title: 'Review: this week\'s Bible readings', learn: [], items: pick(qs, Math.min(6, qs.length), S) }); }
     return null;
   }
 

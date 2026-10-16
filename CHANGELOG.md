@@ -14,6 +14,10 @@
 - Work on a past day's lesson is credited to that lesson's own date (derived from its id), so that day can reach 270 minutes and count toward 180. Stars go to that date's week, unless that week is already marked paid: then they go to the current week (`origWeek` records the original). The streak is only advanced by today's work.
 - Parent → Settings → Calendar: "First school day" (`settings.startDate`, which the app now actually uses).
 
+## Repeats audit (Bible "same every day")
+- Every day's Bible reading, retelling and questions were already different (Gen 1:1-5, 1:6-13, 1:14-25, 1:26-2:3 in week 1). What repeated: the week's memory verse (Genesis 1:1 all of week 1, by design, one step harder each day) and "Keep practicing" for Bible, which in weeks 1-4 drew from the week-5 Abraham bank every day. Fixed: extra Bible practice now uses this week's own readings and is labeled Review; the memory-verse screen says it is the verse of the week and what today's step is.
+- New audit (tests/dupes.js) walks all 202 school days. Unlabeled repeats: 139 before, 0 after. Fixed: summer weeks 38-40 (banks end at week 37) are labeled "Review:"; the week-1 Thursday reading no longer duplicates week 2's re-read; journal prompts that cycle after 190 and the repeated year-end writing piece are labeled Review; the written week-4 Friday Bible lesson that re-uses Wednesday's passage is labeled Review. Lesson ids are unchanged.
+
 ## Safety
 - Same localStorage key; only new fields. Merge keeps `reqt`, prefers the finished record if one device finished a lesson. Old v3 devices keep all new data (unknown keys are merged, not dropped).
 - sw.js cache `ava-school-v4`; precache now bypasses the HTTP cache and network fetches revalidate, so updates arrive as one consistent set.
