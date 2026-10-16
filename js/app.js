@@ -11,6 +11,10 @@
   UI.route('/lesson/:id', function (id) { Player.start(id); });
   UI.route('/stars', function () { Home.stars(); });
   UI.route('/days', function () { Home.days(); });
+  UI.route('/finish/:date', function (d) { Finish.open(d); });
+  UI.route('/redo/:date/:id', function (d, id) { Player.redo(id, d); });
+  UI.route('/practice/:date', function (d) { Player.dayPractice(d); });
+  UI.route('/fix/:date/:key', function (d, k) { Finish.fix(d, k); });
   UI.route('/day/:date', function (d) { Home.day(d); });
   UI.route('/parent', function () { Parent.open(); });
   UI.route('/report', function () { Parent.report(); });

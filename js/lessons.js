@@ -75,12 +75,13 @@
     r.secs = Math.min(reqNeed(c), (+r.secs || 0) + secs); r._u = Store.now();
   }
   function paintReq(c) {
+    if (c.dayPractice) { var dl = dayLeft(c), b2 = document.getElementById('reqbig'); if (b2) b2.textContent = fmtClock(dl); return; }
     var left = reqLeft(c), txt = !c.reqMins ? '' : left > 0 ? '⏳ ' + fmtClock(left) + ' left' : '✅ Time done';
     var el = document.getElementById('reqpill'); if (el) { el.textContent = txt; el.className = 'pill req' + (left > 0 ? '' : ' ok'); }
     var big = document.getElementById('reqbig'); if (big) big.textContent = left > 0 ? fmtClock(left) : '0:00';
   }
   // test-only hook (localhost / file only): pretend `secs` of focused time passed on the open assignment
-  Player._advanceReq = function (secs) { if (!/^(localhost|127\.0\.0\.1)$/.test(location.hostname) || !Track.c) return false; addReq(Track.c, secs); tick(true); return reqLeft(Track.c); };
+  Player._advanceReq = function (secs) { if (!/^(localhost|127\.0\.0\.1)$/.test(location.hostname) || !Track.c) return false; var c = Track.c; addReq(c, secs); tick(true); return reqLeft(c); };
   var blurred = false;
   root.addEventListener && root.addEventListener('blur', function () { blurred = true; });
   root.addEventListener && root.addEventListener('focus', function () { blurred = false; Track.lastTick = Date.now(); });
@@ -94,10 +95,11 @@
       if (!blurred) addReq(c, dt / 1000);
     }
     paintReq(c);
-    if (c.held && reqLeft(c) <= 0) { var held = c.held; c.held = null; flushTime(c); finishLesson(c, held); return; }
+    if (c.dayPractice) { dayTick(c); return; }
+    if (c.held && c.reqMins && reqLeft(c) <= 0) { var held = c.held; c.held = null; flushTime(c); finishLesson(c, held); return; }
     if (n - Track.lastSave > 15000) flushTime(c);
   }
-  function flushTime(c) { if (!c || !c.sess || c.sessSecs < 1) return; Store.logTime(c.sess, { date: c.date, secs: c.sessSecs, subject: c.lesson.subject, block: c.block, lesson: c.lesson.id, src: 'app' }); Track.lastSave = Date.now(); Store.save(); }
+  function flushTime(c) { if (!c || !c.sess || c.sessSecs < 1) return; Store.logTime(c.sess, { date: c.date, secs: c.sessSecs, subject: c.lesson.subject, block: c.block, lesson: c.trackAs || c.lesson.id, src: 'app' }); Track.lastSave = Date.now(); Store.save(); }
   function trackStop() { if (Track.iv) clearInterval(Track.iv); Track.iv = null; if (Track.c) flushTime(Track.c); Track.c = null; }
   function stillWorking() {
     Track.asking = true;
@@ -270,27 +272,98 @@
   // ============================== finish / celebrate ==============================
   function badge(id, list) { if (!Store.state.badges[id]) { Store.state.badges[id] = { ts: Store.now(), _u: Store.now() }; list.push(id); } }
   // v4: work finished before the required time is up -> save it and wait on this page (nothing is marked done yet)
+  function missedItems(c) { var out = []; (c.missed || []).forEach(function (m) { var x = m && m.item; if (x && x.kind !== 'open' && out.length < 15) { try { out.push(JSON.parse(JSON.stringify(x))); } catch (e) { } } }); return out; }
+  // v5: redo attempt from "Finish my day": only the missed items (math: a fresh similar set). No time is logged and no
+  // regular stars; a small bonus per fixed item if the parent allows it. Result is saved on the day's review.
+  Player.redo = function (id, date) {
+    var L = Plan.find(id), st = Store.state; if (!L) { UI.toast('That lesson is not available.'); return UI.go('/'); }
+    var items = Review.redoItems(L, st.progress[id] || {}, date);
+    if (!items.length) { UI.toast('Nothing to redo here.'); return UI.go('/finish/' + date); }
+    var c = makeCtx(L, { practice: true }); c.practice = true; c.date = date; c.redo = true; c.reqMins = 0; c.trackAs = 'redo:' + id; frame(c); trackStart(c);
+    var hd = document.querySelector('.ph .ttl'); if (hd) hd.firstChild.textContent = 'Redo: ' + UI.subjectName(L.subject);
+    UI.cleanup = function () { UI.stopSpeak(); trackStop(); };
+    show([h('div', { class: 'card' }, h('h2', null, '🔁 Let\'s fix these'), h('p', null, items.length + ' question' + (items.length > 1 ? 's' : '') + ' to try again. Take your time and read each one carefully.'), L.learn && L.learn.length ? h('details', null, h('summary', { style: { fontWeight: 700, cursor: 'pointer' } }, 'Look back at the lesson first'), learnCards(c, L.learn)) : null)], [btn('Start', function () {
+      askSequence(c, items, { stage: 'redo', mode: 'practice' }, function () {
+        trackStop(); var res = Review.recordRedo(date, id, { right: c.right1 + c.right2, total: c.total });
+        UI.commit();
+        show([h('div', { class: 'cele' }, h('div', { class: 'big' }, res.passed ? '🌟' : '💪'), h('h1', null, res.passed ? 'Fixed!' : 'Good try!'), h('p', null, (c.right1 + c.right2) + ' of ' + c.total + ' right this time.' + (res.bonus ? ' +' + res.bonus + ' bonus stars for fixing mistakes.' : '')), res.passed ? null : h('p', null, 'You can try this one again after a short break.'),
+          h('div', { class: 'row', style: { justifyContent: 'center' } }, btn('Back to my review', function () { UI.go('/finish/' + date); }, 'gold')))]);
+        setDots(0); if (res.passed && root.Fx) Fx.confetti(60);
+      });
+    }, 'gold')]);
+  };
   function holdForTime(c, summary) {
     var st = Store.state, L = c.lesson, p = st.progress[L.id] || (st.progress[L.id] = { done: false, date: c.date });
     p.workDone = true; p.date = c.date; p.starsGiven = c.given;
-    p.hold = { summary: summary || {}, right1: c.right1, right2: c.right2, total: c.total, wrong: c.wrong, rushed: c.rushed, secs: Math.round(c.secs), extra: c.extra };
+    p.hold = { missed: missedItems(c), summary: summary || {}, right1: c.right1, right2: c.right2, total: c.total, wrong: c.wrong, rushed: c.rushed, secs: Math.round(c.secs), extra: c.extra };
     p._u = Store.now(); flushTime(c); UI.commit();
     c.held = summary || {}; waitScreen(c);
   }
-  function waitScreen(c) {
+  // v5: CONTINUOUS PRACTICE. Work finished before the required time -> roll straight into "Bonus practice" on the same
+  // subject while the countdown keeps running (same visibility/idle rules). Practice never changes the lesson's score.
+  function reviewDetails(c) {
     var L = c.lesson, parts = [];
     if (L.learn && L.learn.length) parts.push(h('details', { class: 'card' }, h('summary', { style: { fontWeight: 700, cursor: 'pointer' } }, '📘 Review what you learned'), L.learn.map(function (x) { return h('div', null, x.h ? h('h4', null, x.h) : null, h('p', null, x.p)); }), UI.canSpeak() ? UI.speakBtn(readAloudOf(L.learn), 'Read it to me') : null));
     if (L.passage && L.passage.length) parts.push(h('details', { class: 'card' }, h('summary', { style: { fontWeight: 700, cursor: 'pointer' } }, '🗣️ Read the passage out loud again'), passageNode(L), UI.canSpeak() ? UI.speakBtn(L.passage.join(' '), 'Read it with me') : null));
-    if (c.missed && c.missed.length) parts.push(h('details', { class: 'card' }, h('summary', { style: { fontWeight: 700, cursor: 'pointer' } }, '🔁 Look over the ones you missed (' + c.missed.length + ')'), c.missed.slice(0, 12).map(function (m) { var it = m.it || m.item || {}; return h('div', { class: 'fb info' }, h('b', { class: 'h' }, it.q || ''), it.why ? h('p', null, it.why) : null); })));
-    var extraIdea = { math: 'Make up 3 problems like today\'s on paper and solve them. Check each one a second way.', facts: 'Say your facts out loud, fastest first, then the tricky ones three times.', reading: 'Read your favorite paragraph out loud with expression, like an audiobook.', grammar: 'Write 3 sentences of your own that use today\'s rule.', writing: 'Re-read your writing out loud and fix one sentence to make it stronger.', science: 'Draw and label a picture of today\'s idea.', social: 'Draw a map or timeline about today\'s topic.', bible: 'Copy today\'s verse in your best handwriting.' }[c.block] || 'Tell a parent the three most important things you learned.';
-    parts.push(h('div', { class: 'card' }, h('h3', null, 'While the timer finishes (optional)'), h('ul', null, h('li', null, 'Look over your answers above.'), h('li', null, extraIdea), h('li', null, 'Read quietly from your chapter book. Tap the screen now and then so the clock knows you are here.'))));
-    show([h('div', { class: 'card req-wait' }, h('h2', null, '🎉 Work finished!'), h('p', null, 'Your answers are saved. This assignment is ' + c.reqMins + ' minutes, so stay on this page until the timer reaches 0:00. Then you get your stars and your ' + c.reqMins + ' minutes for ' + (c.date === c.today ? 'today' : Cal.pretty(c.date)) + '.'),
-      h('div', { class: 'req-big', id: 'reqbig', role: 'timer', 'aria-live': 'off' }, fmtClock(reqLeft(c))), h('p', { class: 'small muted', style: { textAlign: 'center' } }, 'The timer pauses if you switch apps, close the window, or the iPad goes to sleep.')),
-      parts,
-      h('p', { style: { textAlign: 'center' } }, h('button', { class: 'btn ghost small', type: 'button', onclick: function () { UI.requirePin(function () { c.override = true; var held = c.held || {}; c.held = null; finishLesson(c, held); }); } }, '🔒 Parent: count it as finished now'))]);
-    setDots(0); paintReq(c);
+    if (c.pr && c.pr.missed0 && c.pr.missed0.length) parts.push(h('details', { class: 'card' }, h('summary', { style: { fontWeight: 700, cursor: 'pointer' } }, '🔁 Look over the ones you missed (' + c.pr.missed0.length + ')'), c.pr.missed0.slice(0, 12).map(function (m) { var it = m.it || m.item || {}; return h('div', { class: 'fb info' }, h('b', { class: 'h' }, it.q || ''), it.why ? h('p', null, it.why) : null); })));
+    return parts;
   }
+  var MATHY = { math: 1, facts: 1, fluency: 1 };
+  function slotFor(date) { var n = Schedule.dayNum(date, Store.state.settings) || 1; return Schedule.slotOf(n); }
+  function todaysMissed(c) { var st = Store.state, out = []; Plan.forDate(c.date, st.settings).lessons.forEach(function (l) { if (l.block !== c.block) return; var p = st.progress[l.id] || {}; (p.missed || (p.hold && p.hold.missed) || []).forEach(function (x) { out.push(x); }); }); (c.missed || []).forEach(function (m) { if (m.item) out.push(m.item); }); return out.filter(function (x) { return x && x.kind !== 'open'; }); }
+  // next batch of practice items, weighted toward today's misses, adaptive level for generated math
+  function practiceBatch(c) {
+    var pr = c.pr, L = c.lesson, out = [], k = ++pr.batch, sl = slotFor(c.date), seed = hashStr(L.id + c.date + 'bp' + k) % 90000 + 7;
+    if (k === 1) out = out.concat(todaysMissed(c).slice(0, 6));
+    if (MATHY[L.type] || c.block === 'math' || c.block === 'facts') {
+      var missedSk = todaysMissed(c).map(function (x) { return x.skill; }).filter(Boolean), own = L.topics || (L.review) || [], more = ((Schedule.extraLesson('x-math-' + c.date + '-' + (90 + k), Store.state.settings) || {}).topics) || [];
+      var pool = pr.level === 0 ? missedSk.concat(own) : pr.level === 1 ? own.concat(more, missedSk) : more.concat(own);
+      pool = pool.filter(function (t, i, a) { return t && a.indexOf(t) === i && Plan.INFO && Plan.INFO[t]; }); if (!pool.length) pool = more.length ? more : own;
+      pool.slice(0, 4).forEach(function (t, i) { try { Gen.make(t, pr.level === 2 ? 2 : 3, seed + i * 13).forEach(function (q) { out.push(q); }); } catch (e) { } });
+      return shuffleSeeded(out, seed);
+    }
+    if (L.subject === 'spelling') { var sp = Schedule.genLesson(sl.week, sl.role === 'fri' ? 'thu' : sl.role, 'spell-prac'); if (sp && sp.items) out = out.concat(shuffleSeeded(sp.items, seed).slice(0, 6)); }
+    var blk = { grammar: 'grammar', reading: 'reading', science: 'science', social: 'social', bible: 'bible' }[c.block];
+    if (blk) { var x = Schedule.extraLesson('x-' + blk + '-' + c.date + '-' + (50 + k), Store.state.settings); if (x && x.items) out = out.concat(x.items.filter(function (q) { return q.kind !== 'open'; })); }
+    if (!blk || k % 2 === 0 || !out.length) out.push({ kind: 'open', min: 15, q: c.block === 'writing' ? 'Bonus writing: add two more sentences that make your writing stronger. Use a describing word and a "because."' : 'Read your favorite part of today\'s lesson out loud to someone (or to yourself). Then write 2 sentences: what did you learn, and why does it matter?', why: 'Explaining what you learned helps you remember it.' });
+    return out;
+  }
+  function practiceStars(c) {
+    var st = Store.state, per = st.settings.practiceStars === undefined ? 1 : Math.max(0, Math.min(2, +st.settings.practiceStars || 0)); if (!per) return 0;
+    var tag = 'bp-' + c.block + '-' + c.date, got = 0; for (var k in st.ledger) if (st.ledger[k].lesson === tag) got += st.ledger[k].stars;
+    var wk = Store.mondayOf(c.date); if (got >= 10 || Store.weekMoney(wk).capped) return 0;
+    var n = Math.min(per, 10 - got); Store.addStars(n, 'Bonus practice', tag, c.date, c.today); updateStarPill(); return n;
+  }
+  function logPractice(c, correct) {
+    var st = Store.state, P = st.practice || (st.practice = {}), d = P[c.date] || (P[c.date] = {}), b = d[c.block] || (d[c.block] = { right: 0, total: 0, _u: 0 });
+    b.total++; if (correct) b.right++; b._u = Store.now(); d._u = Store.now();
+  }
+  function waitScreen(c) {
+    if (!c.pr) c.pr = { level: 0, streak: 0, n: 0, batch: 0, queue: [], save: { right1: c.right1, right2: c.right2, total: c.total, wrong: c.wrong, rushed: c.rushed, missed: (c.missed || []).slice(), given: c.given, extra: c.extra }, missed0: (c.missed || []).slice() };
+    c.practice = true; practiceNext(c);
+  }
+  function practiceNext(c) {
+    if (!c.held) return; var pr = c.pr;
+    if (!pr.queue.length) pr.queue = practiceBatch(c);
+    var item = pr.queue.shift(); if (!item) { pr.queue = [{ kind: 'open', min: 15, q: 'Write 2 sentences about what you learned today.', why: '' }]; item = pr.queue.shift(); }
+    pr.n++; var idx = pr.n;
+    askItem(c, item, { mode: 'practice', key: 'bp' + (idx % 3), first: 0, second: 0, nextLabel: 'Next practice', done: function (res) {
+      var correct = item.kind === 'open' ? !res.skipped : !res.missed && res.first !== false; logPractice(c, correct);
+      if (correct) { pr.streak++; pr.right = (pr.right || 0) + 1; if (item.kind !== 'open') practiceStars(c); if (pr.streak >= 3) { pr.level = Math.min(2, pr.level + 1); pr.streak = 0; } }
+      else { pr.streak = 0; pr.level = Math.max(0, pr.level - 1); }
+      UI.commit(); practiceNext(c);
+    } });
+    var lvl = ['warm-up', 'on target', 'challenge'][pr.level];
+    var banner = h('div', { class: 'card bp-banner', id: 'bp-banner' }, h('div', { class: 'row', style: { justifyContent: 'space-between', alignItems: 'center' } },
+      h('div', null, h('span', { class: 'badge gold' }, c.dayPractice ? '⭐ Practice rounds: ' + UI.subjectName(c.lesson.subject) : '⭐ Bonus practice'), h('b', null, c.dayPractice ? ' Practice until your school day is done.' : ' Work finished! Keep practicing until the timer ends.'), h('div', { class: 'small muted' }, 'Level: ' + lvl + ' · ' + (pr.right || 0) + ' right so far · small bonus stars for correct answers')),
+      h('div', { class: 'req-big small', id: 'reqbig', role: 'timer', 'aria-label': c.dayPractice ? 'Time left in your school day' : 'Time left' }, fmtClock(c.dayPractice ? dayLeft(c) : reqLeft(c)))),
+      h('details', { class: 'small' }, h('summary', null, 'Look back at the lesson (optional)'), reviewDetails(c)),
+      h('p', { class: 'small muted', style: { margin: '6px 0 0' } }, 'The timer pauses if you switch apps, close the window, or the iPad goes to sleep. ', c.dayPractice ? h('button', { class: 'btn ghost small', type: 'button', id: 'end-day', onclick: function () { UI.requirePin(function () { Player.endDay(c.date, c); }); } }, '🔒 Parent: end the day now') : h('button', { class: 'btn ghost small', type: 'button', onclick: function () { UI.requirePin(function () { c.override = true; var held = c.held || {}; c.held = null; finishLesson(c, held); }); } }, '🔒 Parent: count it as finished now')));
+    stageEl.insertBefore(banner, stageEl.firstChild); setDots(0); paintReq(c);
+  }
+  Player._practiceInfo = function () { var c = Track.c; return c && c.pr ? { level: c.pr.level, n: c.pr.n, right: c.pr.right || 0, practice: !!c.practice } : null; };
   function finishLesson(c, summary) {
+    if (c.pr && c.pr.save) { var sv = c.pr.save; c.right1 = sv.right1; c.right2 = sv.right2; c.total = sv.total; c.wrong = sv.wrong; c.rushed = sv.rushed; c.missed = sv.missed; c.given = sv.given; c.extra = sv.extra; c.practice = false; c.pr.save = null; c.timesUp = true; }
     if (c.reqMins && !c.practice && !c.override && reqLeft(c) > 1) return holdForTime(c, summary);
     touch(c); var L = c.lesson, st = Store.state, wasPractice = c.practice, newBadges = [];
     var total = c.total || 1, pct = Math.round(100 * c.right1 / total);
@@ -299,6 +372,8 @@
       var p = st.progress[L.id] || {}; var tries = (p.tries || 0) + 1;
       st.progress[L.id] = { done: true, date: c.date, right: c.right1, r2: c.right2, total: c.total, secs: Math.round(c.secs), tries: tries, starsGiven: c.given, rushed: c.rushed, hints: c.extra.hints || 0, subject: L.subject, type: L.type, mastered: pct >= 80, _u: Store.now() };
       Object.assign(st.progress[L.id], summary || {});
+      // v5: remember the missed items so "Finish my day" can offer a redo of only those
+      var ms = missedItems(c); if (ms.length) st.progress[L.id].missed = ms;
       // v4: credit exactly the required minutes for this assignment (replaces the tap/timer time for it; fixed id, so two devices never double it)
       if (c.reqMins) { Store.creditLesson(L.id, c.date, c.reqMins, { subject: L.subject, block: c.block, by: c.override ? 'parent' : 'app' }); st.progress[L.id].credit = c.reqMins; if (c.override) st.progress[L.id].byParent = true; }
       if (c.date === c.today) Store.touchStreak(c.date); badge('first', newBadges); if (c.total >= 5 && c.right1 === c.total) badge('perfect', newBadges);
@@ -318,6 +393,8 @@
     var msg = pct >= 80 ? 'Mastered! You really know this.' : pct >= 60 ? 'Good effort. A little more practice will make it stick.' : 'This one is tricky. We will practice it again, and you will get it.';
     var node = h('div', { class: 'cele' }, h('div', { class: 'big' }, wasPractice ? '👏' : '🌟'), h('h1', null, wasPractice ? 'Practice complete' : 'Lesson complete!'),
       !wasPractice && h('div', { class: 'earned' }, '+' + c.stars + ' stars'),
+      c.timesUp ? h('h2', { id: 'times-up' }, '⏰ Time\'s up! Great work. Move on to the next one.') : null,
+      c.timesUp && c.pr ? h('p', null, 'Bonus practice: ' + (c.pr.right || 0) + ' right out of ' + (c.pr.n - 1 > 0 ? c.pr.n - 1 : 0) + ' tried.') : null,
       !wasPractice && c.reqMins ? h('p', null, '⏱️ ' + c.reqMins + ' minutes counted for ' + (c.date === c.today ? 'today' : Cal.pretty(c.date)) + '.') : null,
       showMastery && c.total ? h('p', null, c.right1 + ' of ' + c.total + ' right on the first try (' + pct + '%). ', msg) : null,
       !wasPractice ? h('p', { class: 'muted' }, 'This week: ' + Store.weekStars(wk) + ' stars = ' + UI.money(money.usd) + ' of ' + UI.money(Store.state.settings.weeklyCapUSD) + (money.capped ? ' (you hit the weekly max!)' : '')) : h('p', { class: 'muted' }, 'Practice lessons do not earn stars, but they make you stronger.'),
@@ -757,6 +834,51 @@
     return { day: day, blocks: out, minutes: Store.dayMinutes(date) };
   };
 
+
+  // ============================== v5 PRACTICE ROUNDS (day flow step 4) ==============================
+  // After corrections, practice fills exactly the minutes left to the day's target (Parent → School day threshold).
+  // Time is ordinary tracked time (visible + active only), tagged lesson 'prac:<block>'. Subjects rotate about every 12
+  // minutes, weakest first. It stops at the target and never adds time past it.
+  var ROTATE_SECS = 720, PRACTICE_BLOCKS = ['math', 'grammar', 'reading', 'science', 'social', 'bible', 'facts'];
+  function daySecs(date) { var t = Store.timeSecs(date); return t + (Store.dayMinutes(date) - Math.floor(t / 60)) * 60; }
+  Player.daySecs = daySecs;
+  function dayLeft(c) { return Math.max(0, c.left0 - c.secs); }
+  function blockOrder(date) {
+    var st = Store.state, rev = (st.reviews || {})[date], PR = (st.practice || {})[date] || {}, sc = {}, day = Plan.forDate(date, st.settings);
+    PRACTICE_BLOCKS.forEach(function (b) { sc[b] = 100; });
+    if (rev) for (var k in rev.items) { var it = rev.items[k]; var blk = (Plan.find(it.lesson) || {}).block; if (blk && sc[blk] !== undefined && it.kind === 'auto') sc[blk] = Math.min(sc[blk], it.pct); }
+    for (var b in PR) if (sc[b] !== undefined && PR[b].total >= 3) sc[b] = Math.min(sc[b], Math.round(100 * PR[b].right / PR[b].total));
+    return PRACTICE_BLOCKS.filter(function (b) { return day.blocks.some(function (x) { return x.key === b && x.items.length && x.items[0].type !== 'timer'; }); }).sort(function (a, b2) { return sc[a] - sc[b2]; });
+  }
+  function lessonFor(date, block) { var b = Plan.forDate(date, Store.state.settings).blocks.filter(function (x) { return x.key === block; })[0]; return b && b.items[0]; }
+  Player.dayPractice = function (date) {
+    var T = Store.threshold(), left0 = T * 60 - daySecs(date), order = blockOrder(date);
+    if (left0 <= 0 || !order.length) return UI.go('/finish/' + date);
+    var L = lessonFor(date, order[0]), c = makeCtx(L, { practice: true });
+    c.practice = true; c.date = date; c.reqMins = 0; c.dayPractice = true; c.left0 = left0 + 1; c.secs = 0; c.held = {}; c.block = order[0]; c.trackAs = 'prac:' + order[0];
+    c.pr = { level: 0, streak: 0, n: 0, batch: 0, queue: [], order: order, oi: 0, blockAt: 0, missed0: [] };
+    frame(c); var hd = document.querySelector('.ph .ttl'); if (hd) hd.firstChild.textContent = 'Practice rounds';
+    trackStart(c); UI.cleanup = function () { UI.stopSpeak(); trackStop(); };
+    practiceNext(c);
+  };
+  function dayTick(c) {
+    paintReq(c);
+    if (dayLeft(c) <= 0) { var over = c.secs - c.left0; if (over > 0) { c.secs -= over; c.sessSecs = Math.max(0, c.sessSecs - over); } c.held = null; flushTime(c); trackStop(); dayDone(c.date); return; }
+    if (c.secs - c.pr.blockAt >= ROTATE_SECS && c.pr.order.length > 1) {
+      flushTime(c); c.pr.oi = (c.pr.oi + 1) % c.pr.order.length; var b = c.pr.order[c.pr.oi], L = lessonFor(c.date, b); if (!L) return;
+      c.lesson = L; c.block = b; c.trackAs = 'prac:' + b; c.sess = Store.newId('ls'); c.sessSecs = 0; c.pr.blockAt = c.secs; c.pr.queue = []; c.pr.batch = 0; c.pr.level = 0; c.pr.streak = 0;
+      UI.toast('Switching to ' + UI.subjectName(L.subject) + '!', 3000); practiceNext(c); return;
+    }
+    if (Date.now() - Track.lastSave > 15000) flushTime(c);
+  }
+  function dayDone(date) { UI.commit(); UI.go('/finish/' + date); }
+  Player.endDay = function (date, c) {
+    var st = Store.state, R = st.reviews || (st.reviews = {}), rev = R[date] || Review.build(date); rev.endedByParent = true; rev._u = Store.now();
+    if (c) { c.held = null; trackStop(); } UI.commit(); if (location.hash === '#/finish/' + date) Finish.open(date); else UI.go('/finish/' + date);
+  };
+  // generic active-time tracker (writing corrections): counts like lessons do, tagged with its own lesson tag
+  Player.trackSimple = function (date, tag, subject, block) { var c = { lesson: { id: tag, subject: subject || '' }, date: date, block: block || '', secs: 0, sessSecs: 0, trackAs: tag }; trackStart(c); return function () { trackStop(); }; };
+  Player._dayInfo = function () { var c = Track.c; return c && c.dayPractice ? { left: Math.round(dayLeft(c)), block: c.block, n: c.pr.n } : null; };
   // ============================== entry ==============================
   Player.start = function (id, opts) {
     var L = Plan.find(id); if (!L) { UI.toast('That lesson is not available yet.'); return UI.go('/'); }
@@ -769,7 +891,7 @@
     // v4: work already finished, waiting for the required time -> straight back to the countdown page
     var prev = Store.state.progress[L.id];
     if (L.type !== 'timer' && prev && prev.workDone && !prev.done && !c.practice && c.reqMins) {
-      var hd = prev.hold || {}; c.right1 = hd.right1 || 0; c.right2 = hd.right2 || 0; c.total = hd.total || 0; c.wrong = hd.wrong || 0; c.rushed = hd.rushed || 0; c.secs = hd.secs || 0; c.extra = hd.extra || {};
+      var hd = prev.hold || {}; c.missed = (hd.missed || []).map(function (x) { return { item: x }; }); c.right1 = hd.right1 || 0; c.right2 = hd.right2 || 0; c.total = hd.total || 0; c.wrong = hd.wrong || 0; c.rushed = hd.rushed || 0; c.secs = hd.secs || 0; c.extra = hd.extra || {};
       if (reqLeft(c) <= 1) return finishLesson(c, hd.summary || {});
       c.held = hd.summary || {}; return waitScreen(c);
     }

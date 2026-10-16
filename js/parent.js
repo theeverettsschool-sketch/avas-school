@@ -3,7 +3,7 @@
   'use strict';
   var h = UI.h, S = function () { return Store.state; };
   var Parent = { tab: 'overview' };
-  var TABS = [['overview', 'Overview'], ['review', 'Review'], ['progress', 'Progress'], ['pay', 'Stars & pay'], ['backup', 'Backup'], ['settings', 'Settings'], ['help', 'Plan & help']];
+  var TABS = [['overview', 'Overview'], ['review', 'Review'], ['progress', 'Progress'], ['pay', 'Stars & pay'], ['report', 'Daily report'], ['backup', 'Backup'], ['settings', 'Settings'], ['help', 'Plan & help']];
 
   Parent.backupDue = function () {
     var last = S().settings.lastExport || 0, any = Object.keys(S().progress).some(function (k) { return S().progress[k].done && S().progress[k]._u > last; });
@@ -20,7 +20,7 @@
       var badge = t[0] === 'review' && Parent.reviewCount() ? ' (' + Parent.reviewCount() + ')' : t[0] === 'backup' && Parent.backupDue() ? ' •' : '';
       return h('button', { role: 'tab', 'aria-selected': Parent.tab === t[0] ? 'true' : 'false', onclick: function () { Parent.tab = t[0]; Parent.render(); } }, t[1] + badge);
     }));
-    var fn = { overview: overview, review: review, progress: progress, pay: pay, backup: backup, settings: settings, help: help }[Parent.tab];
+    var fn = { report: function () { var b = h('div'); Finish.report(b); return b; }, overview: overview, review: review, progress: progress, pay: pay, backup: backup, settings: settings, help: help }[Parent.tab];
     body.appendChild(fn());
     UI.render(Home.topbar(), h('main', { class: 'wrap wide' }, h('h1', { style: { marginTop: '18px' } }, 'Parent area'), tabs, body));
   };
@@ -160,6 +160,7 @@
     box.appendChild(h('div', { class: 'card' }, h('h3', null, 'School day'), h('p', { class: 'small muted' }, 'A day counts toward the 180 when its learning time (app timers + lessons + minutes you add) reaches this many minutes. Georgia home study requires 4.5 hours (270 minutes) a day.'),
       h('div', { class: 'row' }, h('label', null, 'Minutes for a day to count: '), thrIn, h('label', null, 'Day starts at: '), startIn, h('button', { class: 'btn small', onclick: function () { st.settings.dayMinutes = Math.max(30, Math.min(600, Math.round(+thrIn.value || 270))); if (/^\d{2}:\d{2}$/.test(startIn.value)) st.settings.dayStart = startIn.value; st.settings._u = Store.now(); UI.commit(); UI.toast('Saved.'); Parent.render(); } }, 'Save'))));
     box.appendChild(reqTimeCard());
+    box.appendChild(Finish.settingsCard());
     // calendar
     var prior = h('input', { class: 'f-in', type: 'number', min: 0, max: 180, value: st.settings.priorDays || 0, style: { width: '110px' }, 'aria-label': 'School days already completed' }), off = h('input', { class: 'f-in', type: 'date', 'aria-label': 'Extra day off' }), mk = h('input', { class: 'f-in', type: 'date', 'aria-label': 'Make-up school day' });
     box.appendChild(h('div', { class: 'card' }, h('h3', null, 'Calendar'), h('p', { class: 'small muted' }, 'The app follows the official Fulton County 2026-27 calendar (breaks and holidays are already off). Her first day is ' + Cal.pretty(Cal.startOf(st.settings)) + '.'),
@@ -183,6 +184,8 @@
     var total = blocks.reduce(function (t, b) { return t + Schedule.blockMins(b.key, set); }, 0);
     var card = h('div', { class: 'card', id: 'req-card' }, h('h3', null, '⏱️ Required time per assignment'),
       h('p', { class: 'small muted' }, 'When she opens an assignment, a countdown shows the time left. It counts only while the page is open and in front (it pauses when she switches apps, the window is hidden, the iPad sleeps, or the "Still working?" check is up). The assignment counts as finished only when her work is done AND the countdown reaches 0. Then she is credited exactly that many minutes for that day. If a block has two assignments (grammar + spelling), its minutes are split between them. 0 = no required time.'),
+      h('div', { class: 'row' }, h('label', { class: 'check' }, (function () { var cb = h('input', { type: 'checkbox', id: 'req-on' }); cb.checked = !!set.reqOn; cb.addEventListener('change', function () { set.reqOn = cb.checked; set._u = Store.now(); UI.commit(); UI.toast(cb.checked ? 'Required time is ON.' : 'Required time is OFF: she moves on when done, and her real tracked time is logged.', 4000); Parent.render(); }); return cb; })(), h('b', null, 'Per-assignment timers: ' + (set.reqOn ? 'On' : 'Off')))),
+      !set.reqOn ? h('p', { class: 'small' }, 'Off (default): no countdown on each assignment. Each lesson logs the time she actually spent (paused when idle). After "Finish my day" and corrections, Practice rounds fill the rest of the day up to ' + Store.threshold() + ' minutes. Turn timers on to require these minutes per assignment instead (minutes below).') : h('p', { class: 'small' }, 'On: each assignment has a countdown; finishing early rolls into Bonus practice until it reaches 0, then exactly these minutes are credited.'),
       h('table', null, h('tbody', null, rows)), h('p', { class: 'small' }, 'Total: ' + total + ' min a day' + (total < Store.threshold() ? ' (less than the ' + Store.threshold() + ' minutes a day needs to count; she can top up with Keep practicing or you can add minutes)' : '') + '.'),
       h('div', { class: 'row' }, h('button', { class: 'btn small gold', onclick: function () { var o = {}; blocks.forEach(function (b) { var v = Math.round(+ins[b.key].value); if (ins[b.key].value !== '' && v >= 0 && v <= 240 && v !== b.mins) o[b.key] = v; }); set.reqMins = o; set._u = Store.now(); UI.commit(); UI.toast('Required times saved.'); Parent.render(); } }, 'Save block times'),
         h('button', { class: 'btn small ghost', onclick: function () { set.reqMins = {}; set._u = Store.now(); UI.commit(); UI.toast('Back to the schedule minutes.'); Parent.render(); } }, 'Reset to schedule')));

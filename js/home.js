@@ -72,7 +72,7 @@
 
   // one row of the timeline
   function blockRow(bs, today, isToday) {
-    var b = bs.b, st = S(), color = UI.subjectColor(b.subject), req = bs.req !== undefined ? bs.req : b.mins, pct = req ? Math.min(100, 100 * bs.mins / req) : (bs.done ? 100 : 0);
+    var b = bs.b, st = S(), color = UI.subjectColor(b.subject), req = bs.req || b.mins, pct = req ? Math.min(100, 100 * bs.mins / req) : (bs.done ? 100 : 0);
     var timerL = b.items.length === 1 && b.items[0].type === 'timer' ? b.items[0] : null, T = timerL ? Player.Timers.get(timerL.id, today) : null, running = T && T.start;
     if (timerL) { var rq = Schedule.reqFor(timerL, today, st.settings); if (rq && !(st.progress[timerL.id] && st.progress[timerL.id].done)) timerL = Object.assign({}, timerL, { mins: rq }); }
     var lessons = b.items.map(function (l) { var p = st.progress[l.id], done = p && p.done, rq = Schedule.reqFor(l, today, st.settings); return h('a', { class: 'bl-item' + (done ? ' done' : ''), href: '#/lesson/' + l.id, 'data-lesson': l.id }, h('span', { class: 'bl-chk', 'aria-hidden': 'true' }, done ? '✓' : ''), h('span', null, l.title), rq && !done ? h('span', { class: 'muted small' }, ' · ' + rq + ' min') : null, p && p.workDone && !done ? h('span', { class: 'badge warn' }, '⏳ timer not done') : p && p.partial && !done ? h('span', { class: 'badge' }, 'in progress') : null); });
@@ -131,6 +131,7 @@
       if (ds.blocks.every(function (b) { return b.full; })) main.appendChild(h('div', { class: 'fb good' }, h('b', { class: 'h' }, 'Every block is finished! 🎉'), 'That is a full school day. Great job.'));
       main.appendChild(h('h2', { class: 'tl-h' }, 'Today\'s schedule'));
       main.appendChild(timeline(ds, today, true));
+      var fb = Finish.button(today); if (fb) main.appendChild(fb);
     }
 
     // missed core lessons (catch-up)
@@ -182,7 +183,7 @@
       h('section', { class: 'sky' }, h('div', { class: 'sky-top' }, h('div', { class: 'sky-hi' }, h('h1', null, Cal.pretty(date)), h('p', { class: 'sub' }, 'School day ' + ds.day.n + ', week ' + ds.day.week), h('p', { class: 'sub' }, full + ' of ' + ds.blocks.length + ' blocks finished')),
         h('div', { class: 'sky-ring' }, Pics.ring(mins / thr, String(mins), 132, 'of ' + thr + ' min'))), constellation(ds.blocks)),
       h('div', { class: 'fb info' }, h('b', { class: 'h' }, 'Catching up on a past day'), 'Everything you finish here counts for ' + Cal.pretty(date) + ': your minutes go to that day (so it can count toward the 180) and your stars go to that week. If that week was already paid, the stars go to this week instead.'),
-      h('h2', { class: 'tl-h' }, 'Schedule for ' + Cal.pretty(date)), timeline(ds, date, true),
+      h('h2', { class: 'tl-h' }, 'Schedule for ' + Cal.pretty(date)), timeline(ds, date, true), Finish.button(date),
       h('p', null, h('a', { class: 'btn ghost', href: '#/days' }, '← All past days'), ' ', h('a', { class: 'btn ghost', href: '#/' }, 'Today')));
     UI.render(topbar('days'), main);
   };

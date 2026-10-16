@@ -16,7 +16,13 @@
         dayMinutes: 270,   // minutes that make a day count toward Georgia's 180 (4.5 hours; lunch and breaks not counted)
         dayStart: '08:30', // clock time the daily schedule starts
         reqMins: {},       // v4: parent's required minutes per block key (missing = the block's schedule minutes)
-        reqLesson: {},     // v4: parent's per-lesson override, lessonId -> minutes
+        reqLesson: {},
+        reqOn: false,        // v5: 'Per-assignment timers' on/off. Default OFF: she moves on when done and real tracked time is logged
+        practiceStars: 1,    // v5: stars per correct Bonus practice item (max 10 per block a day; weekly cap still applies)
+        reviewPct: 80,       // v5: Finish-my-day review: below this % an auto-graded assignment is flagged Redo
+        redoBonus: true,     // v5: small bonus stars for fixing mistakes in a redo
+        redoBonusStars: 1,   // v5: stars per fixed item (max 5 per redo)
+        aiUrl: '',           // v5: optional AI writing-grading proxy URL (blank = off; the key lives only in the proxy)     // v4: parent's per-lesson override, lessonId -> minutes
         _u: 0 },
       progress: {},   // lessonId -> {done, date, score, right, total, secs, tries, _u}
       skills: {},     // skill -> {right, wrong, _u}
@@ -31,7 +37,9 @@
       parentVerses: {}, // verseId -> NIV text pasted by parent
       badges: {},     // id -> {ts}
       readlog: {},    // lessonId -> {date, book, pages, summary, mins, ts, _u}  (v3 novel reading log)
-      reqt: {},       // v4: 'lessonId|date' -> {secs, _u}  seconds counted toward an assignment's required time
+      reqt: {},
+      practice: {},   // v5: date -> block -> {right, total, _u}  Bonus practice results
+      reviews: {},    // v5: date -> Finish-my-day review {date, ts, items:{key:{...}}, done, celebrated, _u}       // v4: 'lessonId|date' -> {secs, _u}  seconds counted toward an assignment's required time
       streak: { last: '', n: 0, best: 0, _u: 0 },
       log: []         // small event log (last 200)
     };
@@ -198,7 +206,9 @@
     var m = migrate(JSON.parse(JSON.stringify(local))), r = migrate(JSON.parse(JSON.stringify(remote)));
     m.profile = (r.profile && r.profile.name && !m.profile.name) ? r.profile : m.profile;
     m.settings = (r.settings._u || 0) > (m.settings._u || 0) ? r.settings : m.settings;
-    var KNOWN = ['v', 'device', 'profile', 'settings', 'progress', 'skills', 'ledger', 'payouts', 'attendance', 'time', 'writing', 'spelling', 'bible', 'memory', 'parentVerses', 'badges', 'readlog', 'reqt', 'streak', 'log', '_saved'];
+    var KNOWN = ['v', 'device', 'profile', 'settings', 'progress', 'skills', 'ledger', 'payouts', 'attendance', 'time', 'writing', 'spelling', 'bible', 'memory', 'parentVerses', 'badges', 'readlog', 'reqt', 'reviews', 'streak', 'log', '_saved'];
+    // v5 reviews: per date and per item, newest wins; a passed redo or parent clear is never lost
+    m.reviews = root.Review && root.Review.merge ? root.Review.merge(local.reviews || {}, remote.reviews || {}) : mergeMap(local.reviews, remote.reviews);
     // v4 required-time counters: per assignment keep the larger count (time only grows), never lose one
     m.reqt = {}; [m.reqt, local.reqt || {}, remote.reqt || {}].forEach(function (x) { for (var q in x) { var c = m.reqt[q], e = x[q]; if (e && (!c || (+e.secs || 0) > (+c.secs || 0))) m.reqt[q] = e; } });
     ['progress', 'skills', 'payouts', 'writing', 'spelling', 'bible', 'memory', 'parentVerses', 'badges', 'readlog'].forEach(function (k) { m[k] = mergeMap(m[k], r[k]); });

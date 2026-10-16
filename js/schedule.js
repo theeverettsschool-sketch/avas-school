@@ -278,7 +278,7 @@
   // Required minutes for one assignment on its day: the parent's per-lesson override, else the block's minutes split
   // across the assignments in that block. 0 = no required time (extra practice, lessons outside the schedule).
   function reqFor(lesson, date, opts) {
-    if (!lesson || lesson.extra || !date) return 0;
+    if (!lesson || lesson.extra || !date || (opts && opts.reqOn === false)) return 0;
     var o = opts && opts.reqLesson && opts.reqLesson[lesson.id]; if (o !== undefined && o !== null && o !== '' && +o >= 0) return Math.round(+o);
     var day = forDate(date, opts), blk = null, idx = -1;
     day.blocks.forEach(function (b) { var i = b.items.map(function (l) { return l.id; }).indexOf(lesson.id); if (i >= 0) { blk = b; idx = i; } });
