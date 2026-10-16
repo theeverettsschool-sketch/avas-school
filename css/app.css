@@ -192,3 +192,10 @@ textarea.ans.journal{min-height:260px;font-family:var(--read);font-size:1.15rem;
 .level-card .row{flex-wrap:nowrap}
 @media print{ .hours-table{font-size:9pt} .hours-table td,.hours-table th{padding:3px 5px} }
 @media (max-width:620px){ .sky-ring svg{width:104px;height:104px} .sky h1{font-size:1.45rem} }
+/* v4: required-time countdown + past days */
+.pill.req{background:#ffe9a8;color:#5a4300;font-variant-numeric:tabular-nums;white-space:nowrap}
+.pill.req.ok{background:#c9f2d6;color:#0d5a2a}
+.req-wait{text-align:center}
+.req-big{font-size:3.4rem;font-weight:800;font-variant-numeric:tabular-nums;margin:8px 0;color:var(--c,#1b2a4e)}
+.day-row .badge{align-self:center;margin-right:6px}
+@media (max-width:520px){.topbar .pill{padding:5px 8px;font-size:.85rem}}

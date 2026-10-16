@@ -40,7 +40,7 @@
   function slotIndex(week, role) { var r = ROLES.indexOf(role); if (week === 1) return r >= 1 ? r : 0; return 4 + (week - 2) * 5 + r + 1; }
   var listCache = { key: '', list: [], index: {} };
   function list(opts) {
-    opts = opts || {}; var key = JSON.stringify([opts.start || '', opts.extraOff || [], opts.makeup || []]);
+    opts = opts || {}; var key = JSON.stringify([opts.start || opts.startDate || '', opts.extraOff || [], opts.makeup || []]);
     if (listCache.key !== key) { var L = Cal.schoolDays(Object.assign({}, opts, { through: '2028-06-30' })), idx = {}; L.forEach(function (d, i) { idx[d] = i + 1; }); listCache = { key: key, list: L, index: idx }; }
     return listCache;
   }
@@ -228,7 +228,7 @@
   }
   function forDate(date, opts) {
     var n = dayNum(date, opts); if (!n) return { n: 0, week: 0, role: null, lessons: [], blocks: [], minutes: DAY_MINUTES };
-    var s = slotOf(n), d = forSlot(s.week, s.role, opts); d.n = n; d.date = date; return d;
+    var s = slotOf(n), d = forSlot(s.week, s.role, opts); d.n = n; d.date = date; d.blocks.forEach(function (b) { b._date = date; }); return d;
   }
   // Core lessons (new material) that should have been finished by `date`, for the catch-up list.
   function dueThrough(date, opts) {
@@ -249,6 +249,28 @@
     if (block === 'bible') { var bu = bank('bible', W) || bank('bible', 5); if (!bu) return null; var qs = []; bu.days.forEach(function (d) { qs = qs.concat(d.questions); }); return Object.assign(base, { subject: 'bible', type: 'lesson', title: 'Extra practice: this week\'s Bible stories', learn: [], items: pick(qs, 6, S) }); }
     return null;
   }
+
+  // ---------------- v4: which school day an assignment belongs to, and its required minutes ----------------
+  // Lesson ids carry their curriculum slot (w5-tue-science) or date (x-math-2026-10-14-1), so the original date is
+  // always known, even after a reload. Used to credit work done later to the day it was assigned.
+  function dateForLesson(id, opts) {
+    var m = /^x-[a-z]+-(\d{4}-\d\d-\d\d)-\d+$/.exec(id); if (m) return m[1];
+    m = /^w(\d+)-(mon|tue|wed|thu|fri)-/.exec(id); if (!m) return null;
+    var W = +m[1], R = m[2]; if (W === 1 && R === 'mon') return null;
+    return dateOfDay(slotIndex(W, R), opts);
+  }
+  function blockMins(key, opts) { var b = BLOCKS.filter(function (x) { return x.key === key; })[0]; if (!b || b.brk) return 0; var v = opts && opts.reqMins && opts.reqMins[key]; return (v !== undefined && v !== null && v !== '' && +v >= 0) ? Math.round(+v) : b.mins; }
+  // Required minutes for one assignment on its day: the parent's per-lesson override, else the block's minutes split
+  // across the assignments in that block. 0 = no required time (extra practice, lessons outside the schedule).
+  function reqFor(lesson, date, opts) {
+    if (!lesson || lesson.extra || !date) return 0;
+    var o = opts && opts.reqLesson && opts.reqLesson[lesson.id]; if (o !== undefined && o !== null && o !== '' && +o >= 0) return Math.round(+o);
+    var day = forDate(date, opts), blk = null, idx = -1;
+    day.blocks.forEach(function (b) { var i = b.items.map(function (l) { return l.id; }).indexOf(lesson.id); if (i >= 0) { blk = b; idx = i; } });
+    if (!blk) return 0; var total = blockMins(blk.key, opts), n = blk.items.length, each = Math.floor(total / n);
+    return each + (idx < total - each * n ? 1 : 0);
+  }
+  function blockReq(b, opts) { var t = 0; b.items.forEach(function (l) { t += reqFor(l, b._date, opts); }); return t; }
   function find(id) {
     if (C.lessons[id]) return C.lessons[id];
     var m = id.match(/^w(\d+)-(mon|tue|wed|thu|fri)-([a-z-]+)$/); if (m) return genLesson(+m[1], m[2], m[3]);
@@ -272,7 +294,7 @@
   function nextIn(S) { var a = S.int(1, 5), d = S.int(1, 4), seq = [a], i; for (i = 1; i < 5; i++) seq.push(seq[i - 1] + d + i - 1); var nx = seq[4] + d + 4, o = opts4(S, nx); return C.Q('What comes next? ' + seq.join(', ') + ', __', o.options, o.a, 'Look at the jumps between numbers: ' + seq.slice(1).map(function (x, j) { return x - seq[j]; }).join(', ') + '. Each jump grows by 1, so the next jump is ' + (d + 4) + ': ' + seq[4] + ' + ' + (d + 4) + ' = ' + nx + '.', 'Look at how much each jump grows.'); }
   function clock(S) { var h = S.int(1, 11), m = S.pick([0, 15, 30, 45]), ah = S.int(1, 4), am = S.pick([15, 30, 45, 20]), tot = h * 60 + m + ah * 60 + am, eh = Math.floor(tot / 60), em = tot % 60, f = function (H, M) { var hh = ((H - 1) % 12) + 1; return hh + ':' + (M < 10 ? '0' : '') + M; }, right = f(eh, em), o = S.shuffle([right, f(eh + 1, em), f(eh, (em + 30) % 60), f(eh - 1 || 12, em)]).filter(function (x, i, a) { return a.indexOf(x) === i; }); if (o.length < 3) o.push(f(eh + 2, em)); return C.Q('A movie starts at ' + f(h, m) + '. It lasts ' + ah + ' hour' + (ah > 1 ? 's' : '') + ' and ' + am + ' minutes. What time does it end?', o, o.indexOf(right), 'Add the hours first: ' + f(h, m) + ' + ' + ah + ' hour' + (ah > 1 ? 's' : '') + ' = ' + f(h + ah, m) + '. Then add ' + am + ' minutes: ' + (m + am >= 60 ? m + ' + ' + am + ' = ' + (m + am) + ' minutes, which is 1 hour and ' + (m + am - 60) + ' minutes, so ' : '') + 'the movie ends at ' + right + '.', 'Add the hours, then the minutes. 60 minutes make an hour.'); }
 
-  var Schedule = { BLOCKS: BLOCKS, ROT: ROT, DAY_MINUTES: DAY_MINUTES, SUBJECT_BLOCK: SUBJECT_BLOCK, slotOf: slotOf, slotIndex: slotIndex, dayNum: dayNum, dateOfDay: dateOfDay, forDate: forDate, forSlot: forSlot, dueThrough: dueThrough, find: find, genLesson: genLesson, extraLesson: extraLesson, weekOf: weekOf, bank: bank, misspell: misspell, minToTime: minToTime, timeToMin: timeToMin, Puzzles: Puzzles };
+  var Schedule = { BLOCKS: BLOCKS, ROT: ROT, DAY_MINUTES: DAY_MINUTES, SUBJECT_BLOCK: SUBJECT_BLOCK, slotOf: slotOf, slotIndex: slotIndex, dayNum: dayNum, dateOfDay: dateOfDay, forDate: forDate, forSlot: forSlot, dueThrough: dueThrough, find: find, genLesson: genLesson, extraLesson: extraLesson, weekOf: weekOf, bank: bank, dateForLesson: dateForLesson, reqFor: reqFor, blockMins: blockMins, blockReq: blockReq, misspell: misspell, minToTime: minToTime, timeToMin: timeToMin, Puzzles: Puzzles };
   // take over day assembly in Plan (old weekday-based versions stay available as Plan._old*)
   Plan._oldForDate = Plan.forDate; Plan._oldFind = Plan.find; Plan._oldDueThrough = Plan.dueThrough; Plan._oldWeekOf = Plan.weekOf;
   Plan.forDate = forDate; Plan.find = find; Plan.dueThrough = dueThrough; Plan.weekOf = weekOf;
