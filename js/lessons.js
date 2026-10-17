@@ -784,6 +784,15 @@
   Player.Timers = Timers;
   function fmtClock(secs) { secs = Math.max(0, Math.round(secs)); var m = Math.floor(secs / 60), s2 = secs % 60; return m + ':' + (s2 < 10 ? '0' : '') + s2; }
   Player.fmtClock = fmtClock;
+  // Music lessons ask her to listen to a piece, so give her a button that finds a recording (opens in a new tab;
+  // the timer keeps counting from clock timestamps while she listens).
+  function musicLink(L) {
+    if (L.icon !== '\ud83c\udfb5' || !/^Music/.test(L.title || '')) return null;
+    var t = String(L.title).replace(/^[^:]*:\s*/, ''), hymn = /^Hymn:/.test(t);
+    if (!hymn && !/^(Bach|Vivaldi|Mozart|Beethoven|Handel|Tchaikovsky|Haydn|Chopin|Debussy|Grieg|Holst|Saint|Copland|Sousa|Dvo)/.test(t)) return null;
+    var q = hymn ? t.replace(/^Hymn:\s*/, '') + ' hymn with lyrics' : t.replace(/:/, '');
+    return h('p', { style: { textAlign: 'center' } }, h('a', { class: 'btn gold', href: 'https://www.youtube.com/results?search_query=' + encodeURIComponent(q), target: '_blank', rel: 'noopener' }, '\ud83c\udfa7 Play the music'), h('br'), h('span', { class: 'small muted' }, 'Opens a recording in a new tab. Start the timer here, then come back when the music ends.'));
+  }
   function startTimer(L, c) {
     var st = Store.state, iv = null, prevBook = (function () { var R = st.readlog || {}, best = null; for (var k in R) if (!best || R[k].ts > best.ts) best = R[k]; return best ? best.book : ''; })();
     var ring = h('div', { class: 'tring' }), clock = h('div', { class: 'tclock' }), startB = btn('Start', function () { Timers.start(L, c.date); paint(); }, 'gold'), pauseB = btn('Pause', function () { Timers.pause(L.id); paint(); }, 'ghost'),
@@ -803,7 +812,7 @@
       if (L.note && note.value.trim()) { st.writing[L.id + ':note'] = { kind: 'note', q: L.title, text: note.value.trim(), ts: Store.now(), date: c.date, status: 'submitted', lesson: L.id, subject: L.subject, _u: Store.now() }; }
       clearInterval(iv); finishLesson(c, { timer: true, mins: Math.round(e / 60) });
     }
-    show([h('div', { class: 'card timer-card' }, h('h2', null, (L.icon ? L.icon + ' ' : '') + L.title), h('p', { style: { fontSize: '1.1rem' } }, L.how), h('div', { class: 'tbox' }, ring, clock), h('div', { class: 'row', style: { justifyContent: 'center' } }, startB, pauseB, moreB),
+    show([h('div', { class: 'card timer-card' }, h('h2', null, (L.icon ? L.icon + ' ' : '') + L.title), h('p', { style: { fontSize: '1.1rem' } }, L.how), musicLink(L), h('div', { class: 'tbox' }, ring, clock), h('div', { class: 'row', style: { justifyContent: 'center' } }, startB, pauseB, moreB),
       h('p', { class: 'muted small', style: { textAlign: 'center' } }, 'The timer keeps running if you go back to Home. It stops by itself after ' + L.mins + ' minutes.')),
       L.log ? h('div', { class: 'card' }, h('h3', null, 'Reading log'), h('label', { class: 'f' }, 'Book'), book, h('label', { class: 'f' }, 'What I read today'), pages, h('label', { class: 'f' }, 'Summary'), sum) : null,
       L.note ? h('div', { class: 'card' }, h('h3', null, 'Notes'), note) : null,
