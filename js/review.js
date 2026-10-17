@@ -25,7 +25,8 @@
         reasons.push('Some of this looks like repeated or made-up words. Use real sentences that say something new each time.');
     }
     var kw = keywords(o.prompt);
-    if (n >= 5 && kw.length >= 2 && !kw.some(function (k) { return lw.some(function (w) { return w.slice(0, 5) === k.slice(0, 5); }); }))
+    // only for real questions ("Why did...?"); creative prompts like "Write the first sentence of your story" are not checked for the prompt's words
+    if (n >= 5 && kw.length >= 2 && /\?/.test(String(o.prompt || '')) && !kw.some(function (k) { return lw.some(function (w) { return w.slice(0, 5) === k.slice(0, 5); }); }))
       reasons.push('Make sure you answer the question: "' + String(o.prompt).slice(0, 120) + '" Use some of its words in your answer.');
     if (n >= 4) {
       var sents = t.split(/(?<=[.!?])\s+/).map(function (x) { return x.trim(); }).filter(Boolean), low = sents.filter(function (x) { return /^[a-z]/.test(x); }).length;
