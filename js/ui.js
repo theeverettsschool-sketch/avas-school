@@ -62,6 +62,8 @@
   };
 
   // ---------- parent PIN ----------
+  // Leaving the parent area locks it again, so Ava can't walk back in during the old 10-minute window.
+  window.addEventListener('hashchange', function () { if (!/^#\/parent/.test(location.hash)) UI.parentUntil = 0; });
   UI.requirePin = function (cb, onCancel) {
     var st = Store.state.settings;
     if (!st.pinHash) return cb();
