@@ -33,6 +33,13 @@
       if (!/[.!?]["”')]*\s*$/.test(t.trim()) && !/[.!?]/.test(t)) reasons.push('Add end marks: every sentence needs a period, question mark, or exclamation point.');
       else if (low > 0 && low / sents.length > 0.5) reasons.push('Start each sentence with a capital letter.');
       if (/(^|\s)i(\s|'|’|$)/.test(t)) reasons.push('When you write about yourself, "I" is always a capital letter.');
+      // text-speak: school writing spells words out
+      var TXT = { u: 'you', r: 'are', ur: 'your (or you are)', ya: 'you', yu: 'you', b4: 'before', '2day': 'today', '2morrow': 'tomorrow', l8r: 'later', gr8: 'great', cuz: 'because', bc: 'because', bcuz: 'because', becuz: 'because', thx: 'thanks', ty: 'thank you', pls: 'please', plz: 'please', idk: "I don't know", lol: '(leave it out)', omg: '(leave it out)', btw: 'by the way', im: "I'm", dont: "don't", cant: "can't", wont: "won't", didnt: "didn't", wanna: 'want to', gonna: 'going to', gotta: 'have to', n: 'and', w: 'with', k: 'okay' };
+      var found = [], seenT = {}; t.split(/[^A-Za-z0-9']+/).forEach(function (w) { var k = w.toLowerCase(); if (TXT[k] && !seenT[k] && !(k === 'w' && w === 'W') && !(k === 'n' && w === 'N')) { seenT[k] = 1; found.push('"' + w + '" should be "' + TXT[k] + '"'); } });
+      if (found.length) reasons.push('Spell words all the way out, like in a letter or a book: ' + found.slice(0, 4).join(', ') + '.');
+      // God and Jesus are names, so they get a capital letter (but "a god" or "false gods" stay lowercase)
+      var names = []; if (/(^|[^A-Za-z])god(?![A-Za-z])/.test(t) && /(^|[^a-z])(?<!\b(a|false|other|pagan|greek|roman|egyptian|any|no)\s)god(?![A-Za-z])/i.test(t.replace(/God/g, 'X')) ) names.push('"God"'); if (/(^|[^A-Za-z])jesus(?![A-Za-z])/.test(t)) names.push('"Jesus"'); if (/(^|[^A-Za-z])(holy spirit|holy Spirit|Holy spirit)(?![A-Za-z])/.test(t)) names.push('"Holy Spirit"'); if (/(^|[^A-Za-z])bible(?![A-Za-z])/.test(t)) names.push('"Bible"');
+      if (names.length) reasons.push('Names get a capital letter: write ' + names.join(', ') + ' with a capital.');
     }
     return { ok: reasons.length === 0, reasons: reasons, words: n };
   }

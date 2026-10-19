@@ -156,7 +156,7 @@
   // Step-by-step reveal ("Watch me")
   function stepReveal(c, steps, onDone) {
     var list = h('ol', { class: 'steps' }), i = 0, nextBtn, wrap = h('div');
-    function more() { touch(c); list.appendChild(h('li', null, steps[i])); i++; if (i >= steps.length) { nextBtn.remove(); onDone && onDone(); } else nextBtn.textContent = 'Show next step (' + (i + 1) + ' of ' + steps.length + ')'; if (UI.canSpeak() && Store.state.settings.readAloud) UI.speak(steps[i - 1]); }
+    function more() { touch(c); list.appendChild(h('li', null, steps[i])); i++; if (i >= steps.length) { nextBtn.remove(); onDone && onDone(); } else nextBtn.textContent = 'Show next step (' + (i + 1) + ' of ' + steps.length + ')'; if (UI.canSpeak() && Store.state.settings.readAloud && Store.state.settings.autoSpeak) UI.speak(steps[i - 1]); }
     nextBtn = btn('Show step 1 of ' + steps.length, more, 'gold'); wrap.appendChild(list); wrap.appendChild(h('div', { style: { margin: '10px 0' } }, nextBtn)); return wrap;
   }
 
@@ -537,7 +537,7 @@
         function look() {
           var go = btn('Cover it and write it', function () { write(false); }, 'gold');
           show([h('span', { class: 'badge' }, label + ' ' + (idx + 1) + ' of ' + list.length), h('div', { class: 'big-word' }, w.w), h('div', { class: 'row', style: { justifyContent: 'center' } }, UI.canSpeak() ? btn('🔊 Hear it', function () { UI.speak(w.w + '. ' + w.s); }, 'ghost small') : null), h('div', { class: 'card' }, h('p', null, h('b', null, 'In a sentence: '), w.s), w.tip ? h('p', { class: 'muted' }, h('b', null, 'Memory trick: '), w.tip) : null), h('p', { class: 'muted small' }, 'Say the letters out loud, then cover the word.')], [go]);
-          if (UI.canSpeak()) UI.speak(w.w);
+          if (UI.canSpeak() && Store.state.settings.autoSpeak) UI.speak(w.w);
         }
         function write(retry) {
           var inp = h('input', { class: 'ans', type: 'text', autocomplete: 'off', autocorrect: 'off', autocapitalize: 'off', spellcheck: 'false', 'aria-label': 'Type the word' }), fb = h('div'), chk = btn('Check', check, 'gold'); chk.disabled = true;
