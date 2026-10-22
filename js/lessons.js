@@ -214,7 +214,8 @@
     function onCheck() {
       touch(c); var elapsed = Date.now() - t0, correct;
       if (it.type === 'open') {
-        var txt = inputEl.value.trim(); var key = c.lesson.id + ':' + (o.key || 'o'); Store.state.writing[key] = { kind: 'open', q: it.q, text: txt, ts: Store.now(), date: c.date, status: 'submitted', lesson: c.lesson.id, subject: c.lesson.subject, _u: Store.now() };
+        var txt = inputEl.value.trim(); var key = c.lesson.id + ':' + (o.key || 'o');
+        var hs = writingHints(txt); if (hs.length && inputEl.dataset.hinted !== txt) { inputEl.dataset.hinted = txt; checkBtn.textContent = 'Turn in anyway'; inputEl.addEventListener('input', function rs() { if (inputEl.value.trim() !== inputEl.dataset.hinted) { checkBtn.textContent = 'Turn in'; inputEl.removeEventListener('input', rs); } }); fb.innerHTML = ''; fb.appendChild(hintsNode(hs, { lead: 'Nice thinking! Before you turn it in, take a look at these. Fix what you can and tap Turn in, or tap Turn in anyway.', fix: function () { fb.innerHTML = ''; inputEl.focus(); } })); return; } Store.state.writing[key] = { kind: 'open', q: it.q, text: txt, ts: Store.now(), date: c.date, status: 'submitted', lesson: c.lesson.id, subject: c.lesson.subject, _u: Store.now() };
         award(c, 3, 'Written answer'); UI.commit(); fb.innerHTML = ''; fb.appendChild(h('div', { class: 'fb good' }, h('b', { class: 'h' }, 'Turned in!'), 'Your parent will read this. Nice thinking.')); inputEl.disabled = true; c.total++; c.right1++; return finish({ first: true });
       }
       if (it.type === 'choice') correct = sel === it.correct; else correct = it.check(inputEl.value);
@@ -310,7 +311,7 @@
   }
   var MATHY = { math: 1, facts: 1, fluency: 1 };
   function slotFor(date) { var n = Schedule.dayNum(date, Store.state.settings) || 1; return Schedule.slotOf(n); }
-  function todaysMissed(c) { var st = Store.state, out = []; Plan.forDate(c.date, st.settings).lessons.forEach(function (l) { if (l.block !== c.block) return; var p = st.progress[l.id] || {}; (p.missed || (p.hold && p.hold.missed) || []).forEach(function (x) { out.push(x); }); }); (c.missed || []).forEach(function (m) { if (m.item) out.push(m.item); }); return out.filter(function (x) { return x && x.kind !== 'open'; }); }
+  function todaysMissed(c) { var st = Store.state, out = []; Plan.forDate(c.date, st.settings).lessons.forEach(function (l) { if (l.block !== c.block) return; var p = st.progress[l.id] || {}; (p.missed || (p.hold && p.hold.missed) || []).forEach(function (x) { out.push(x); }); }); (c.missed || []).forEach(function (m) { if (m.item) out.push(m.item); }); if (root.Assess && c.block !== 'assess') { try { Assess.missedFor(c.date, c.block === 'facts' ? 'math' : c.block).slice(0, 6).forEach(function (x) { out.push(x); }); } catch (e) { } } return out.filter(function (x) { return x && x.kind !== 'open'; }); }
   // next batch of practice items, weighted toward today's misses, adaptive level for generated math
   function practiceBatch(c) {
     var pr = c.pr, L = c.lesson, out = [], k = ++pr.batch, sl = slotFor(c.date), seed = hashStr(L.id + c.date + 'bp' + k) % 90000 + 7;
@@ -491,6 +492,10 @@
     });
     if (L.lab) stages.push(named('lab', function (next) { labStage(c, L.lab, next); }));
     if (L.items && L.items.length) stages.push(named('items', function (next) {
+      if (L.assess) { // v11 weekly quiz / monthly test: one try per question, then we look at the missed ones together
+        var qi = h('div', { class: 'card' }, h('h2', null, L.test ? 'Monthly test 🏆' : 'Quiz time 📝'), h('p', null, L.items.length + ' questions, about ' + L.mins + ' minutes. Each question gets one try, and I will show you the answers at the end. 2 stars for each right answer.'), h('p', { class: 'muted small' }, 'Questions you miss come back in your practice rounds, so every miss helps you learn.'));
+        return show([qi], [btn('Start', function () { askSequence(c, L.items, { stage: 'items', mode: 'test' }, function () { reviewMisses(c, next); }); }, 'gold')]);
+      }
       var intro = h('div', { class: 'card' }, h('h2', null, 'Your turn'), h('p', null, 'Stars: 2 for a right answer on the first try, 1 for the second. After every question I will explain why, so you learn even when you miss.'), L.passage ? h('details', null, h('summary', { style: { fontWeight: 700, cursor: 'pointer' } }, 'Show the passage again'), passageNode(L)) : null);
       show([intro], [btn('Start', function () { askSequence(c, L.items, { stage: 'items' }, next); }, 'gold')]);
     }));
@@ -601,9 +606,12 @@
       function (next) {
         var prev = L.carryFrom && st.writing[L.carryFrom], nodes = [h('h2', null, 'Your writing'), h('p', { class: 'muted' }, 'You can type, or tap the microphone on the iPad keyboard to speak your words. Your work saves as you go.')];
         if (prev && prev.fields) nodes.push(h('details', { class: 'card' }, h('summary', { style: { fontWeight: 700, cursor: 'pointer' } }, 'Show my earlier work'), Object.keys(prev.fields).map(function (k) { return h('p', null, prev.fields[k]); })));
-        var checks = [], nextBtn = btn('Check my work', function () { next(); }, 'gold'); function upd() { var ok = L.fields.every(function (f) { return UI.wordCount(rec.fields[f.id] || '') >= f.min; }); nextBtn.disabled = !ok; }
-        L.fields.forEach(function (f) { var ta = h('textarea', { class: 'ans', id: 'f_' + f.id, 'aria-label': f.label, autocapitalize: 'sentences' }); ta.value = rec.fields[f.id] || ''; var wc = h('div', { class: 'small muted' }); function cnt() { var n = UI.wordCount(ta.value); wc.textContent = n + ' words (need at least ' + f.min + ')'; wc.style.color = n >= f.min ? 'var(--good)' : 'var(--muted)'; } ta.addEventListener('input', function () { rec.fields[f.id] = ta.value; cnt(); upd(); saveSoon(); }); cnt(); nodes.push(h('label', { class: 'f', for: 'f_' + f.id }, f.label), ta, wc); });
-        show(nodes, [nextBtn]); upd();
+        var checks = [], hintBox = h('div', { class: 'hint-box' }), seen = null, nextBtn = btn('Check my work', function () {
+          var rs = []; L.fields.forEach(function (f) { writingHints(rec.fields[f.id] || '').forEach(function (r) { rs.push((L.fields.length > 1 ? f.label.split(':')[0].split('(')[0].trim() + ': ' : '') + r); }); });
+          var sig = JSON.stringify(rec.fields); if (rs.length && seen !== sig) { seen = sig; hintBox.innerHTML = ''; hintBox.appendChild(hintsNode(rs, { lead: 'Nice work! Look these over and fix what you can, or tap Keep going anyway.' })); nextBtn.textContent = 'Keep going anyway'; return; }
+          next(); }, 'gold'); function upd() { var ok = L.fields.every(function (f) { return UI.wordCount(rec.fields[f.id] || '') >= f.min; }); nextBtn.disabled = !ok; }
+        L.fields.forEach(function (f) { var ta = h('textarea', { class: 'ans', id: 'f_' + f.id, 'aria-label': f.label, autocapitalize: 'sentences' }); ta.value = rec.fields[f.id] || ''; var wc = h('div', { class: 'small muted' }); function cnt() { var n = UI.wordCount(ta.value); wc.textContent = n + ' words (need at least ' + f.min + ')'; wc.style.color = n >= f.min ? 'var(--good)' : 'var(--muted)'; } ta.addEventListener('input', function () { rec.fields[f.id] = ta.value; cnt(); upd(); saveSoon(); if (seen !== null && JSON.stringify(rec.fields) !== seen) nextBtn.textContent = 'Check my work'; }); cnt(); nodes.push(h('label', { class: 'f', for: 'f_' + f.id }, f.label), ta, wc); });
+        nodes.push(hintBox); show(nodes, [nextBtn]); upd();
       },
       function (next) {
         var boxes = [], sub = btn('Turn it in', next, 'gold'); sub.disabled = true; function upd() { sub.disabled = !boxes.every(function (b) { return b.checked; }); }
@@ -788,10 +796,45 @@
   // the timer keeps counting from clock timestamps while she listens).
   function musicLink(L) {
     if (L.icon !== '\ud83c\udfb5' || !/^Music/.test(L.title || '')) return null;
-    var t = String(L.title).replace(/^[^:]*:\s*/, ''), hymn = /^Hymn:/.test(t);
-    if (!hymn && !/^(Bach|Vivaldi|Mozart|Beethoven|Handel|Tchaikovsky|Haydn|Chopin|Debussy|Grieg|Holst|Saint|Copland|Sousa|Dvo)/.test(t)) return null;
-    var q = hymn ? t.replace(/^Hymn:\s*/, '') + ' hymn with lyrics' : t.replace(/:/, '');
-    return h('p', { style: { textAlign: 'center' } }, h('a', { class: 'btn gold', href: 'https://www.youtube.com/results?search_query=' + encodeURIComponent(q), target: '_blank', rel: 'noopener' }, '\ud83c\udfa7 Play the music'), h('br'), h('span', { class: 'small muted' }, 'Opens a recording in a new tab. Start the timer here, then come back when the music ends.'));
+    var t = String(L.title).replace(/^[^:]*:\s*/, ''), hymn = /^Hymn:/.test(t), q = null, label = '\ud83c\udfa7 Play the music';
+    if (hymn) q = t.replace(/^Hymn:\s*/, '') + ' hymn with lyrics';
+    else if (/^(Bach|Vivaldi|Mozart|Beethoven|Handel|Tchaikovsky|Haydn|Chopin|Debussy|Grieg|Holst|Saint|Copland|Sousa|Dvo)/.test(t)) q = t.replace(/:/, '');
+    else if (/^Clap the rhythm/i.test(t)) { q = 'Amazing Grace hymn with lyrics'; label = '\ud83c\udfa7 Play a hymn to clap with'; }
+    else if (/^Listen and draw/i.test(t)) { q = 'Grieg In the Hall of the Mountain King'; label = '\ud83c\udfa7 Play the music to draw to'; }
+    else if (/instrument|shaker|play along|sing/i.test(t + ' ' + (L.how || ''))) { var m = /'([^']+)'/.exec(L.how || ''); q = (m ? m[1] : 'Amazing Grace') + ' hymn with lyrics'; label = '\ud83c\udfa7 Play a hymn to play along with'; }
+    else if (/listen|recording|piece/i.test(L.how || '')) { var m2 = /'([^']+)'/.exec(L.how || ''); q = m2 ? m2[1] : 'classical music for kids'; }
+    if (!q) return null;
+    return h('p', { style: { textAlign: 'center' }, class: 'music-link' }, h('a', { class: 'btn gold', href: 'https://www.youtube.com/results?search_query=' + encodeURIComponent(q), target: '_blank', rel: 'noopener' }, label), h('br'), h('span', { class: 'small music-note' }, 'Press Start first, then Play the music.'), h('span', { class: 'small muted' }, 'The music opens in a new tab. Your timer keeps counting while you listen, so come back here when the music ends.'));
+  }
+  Player.musicLink = musicLink;
+
+
+  // ============================== v11: friendly writing hints (before Turn it in) ==============================
+  // Uses Review.checkWriting without the word-count and prompt-keyword rules (those are not hints). Never blocks:
+  // she can fix things or turn it in anyway (Finish my day still flags it).
+  function writingHints(text) {
+    try { if (!root.Review || !String(text || '').trim()) return []; return Review.checkWriting(text, { min: 0, what: 'writing' }).reasons.filter(function (r) { return !/needs at least|answer the question/i.test(r); }); } catch (e) { return []; }
+  }
+  Player.writingHints = writingHints;
+  function hintsNode(reasons, o) {
+    o = o || {};
+    return h('div', { class: 'fb info hints', id: 'writing-hints', role: 'status' }, h('b', { class: 'h' }, reasons.length ? '✨ A few quick fixes' : '✅ Looks great!'),
+      reasons.length ? [h('p', null, o.lead || 'Nice work so far! Before you turn it in, take a look at these:'), h('ul', null, reasons.map(function (r) { return h('li', null, r); }))] : h('p', null, 'Capitals, end marks, and spelling look good. You can turn it in.'),
+      reasons.length && (o.fix || o.anyway) ? h('div', { class: 'row', style: { marginTop: '6px' } }, o.fix ? btn('I will fix it', o.fix, 'ghost small') : null, o.anyway ? btn(o.anywayLabel || 'Turn it in anyway', o.anyway, 'small') : null) : null);
+  }
+  // ============================== v11: free bookshelf (backup for library books) ==============================
+  var BOOKSHELF = [
+    [113, 'The Secret Garden', 'Frances Hodgson Burnett'], [146, 'A Little Princess', 'Frances Hodgson Burnett'], [271, 'Black Beauty', 'Anna Sewell'], [1448, 'Heidi', 'Johanna Spyri'],
+    [55, 'The Wonderful Wizard of Oz', 'L. Frank Baum'], [45, 'Anne of Green Gables', 'L. M. Montgomery'], [1450, 'Pollyanna', 'Eleanor H. Porter'], [11757, 'The Velveteen Rabbit', 'Margery Williams'],
+    [2781, 'Just So Stories', 'Rudyard Kipling'], [16, 'Peter Pan', 'J. M. Barrie'], [778, 'Five Children and It', 'E. Nesbit'], [1874, 'The Railway Children', 'E. Nesbit'],
+    [500, 'The Adventures of Pinocchio', 'Carlo Collodi'], [11, "Alice's Adventures in Wonderland", 'Lewis Carroll']
+  ];
+  Player.BOOKSHELF = BOOKSHELF;
+  function bookshelf() {
+    return h('details', { class: 'card bookshelf', id: 'bookshelf' }, h('summary', null, '📖 No book today? Free bookshelf'),
+      h('p', { class: 'small muted' }, 'Your library book comes first! If you do not have it today, pick one of these classic chapter books. They are free and open in a new tab, and your timer keeps running.'),
+      h('ul', null, BOOKSHELF.map(function (b) { return h('li', null, h('a', { href: 'https://www.gutenberg.org/ebooks/' + b[0], target: '_blank', rel: 'noopener' }, h('b', null, b[1]), h('span', null, b[2] + ' · Project Gutenberg ↗'))); })),
+      h('p', { class: 'small muted' }, 'Tip for parents: a Fulton County Library card and the free Libby app have lots of library e-books and audiobooks too.'));
   }
   function startTimer(L, c) {
     var st = Store.state, iv = null, prevBook = (function () { var R = st.readlog || {}, best = null; for (var k in R) if (!best || R[k].ts > best.ts) best = R[k]; return best ? best.book : ''; })();
@@ -814,6 +857,7 @@
     }
     show([h('div', { class: 'card timer-card' }, h('h2', null, (L.icon ? L.icon + ' ' : '') + L.title), h('p', { style: { fontSize: '1.1rem' } }, L.how), musicLink(L), h('div', { class: 'tbox' }, ring, clock), h('div', { class: 'row', style: { justifyContent: 'center' } }, startB, pauseB, moreB),
       h('p', { class: 'muted small', style: { textAlign: 'center' } }, 'The timer keeps running if you go back to Home. It stops by itself after ' + L.mins + ' minutes.')),
+      L.log ? bookshelf() : null,
       L.log ? h('div', { class: 'card' }, h('h3', null, 'Reading log'), h('label', { class: 'f' }, 'Book'), book, h('label', { class: 'f' }, 'What I read today'), pages, h('label', { class: 'f' }, 'Summary'), sum) : null,
       L.note ? h('div', { class: 'card' }, h('h3', null, 'Notes'), note) : null,
       h('details', { class: 'small muted' }, h('summary', null, 'Need to stop early?'), c.reqMins ? h('p', null, 'Pause and come back later: the timer keeps what you did. This block counts as finished (with stars and ' + c.reqMins + ' minutes) when the timer is done.') : h('p', null, 'You can finish early. The minutes you did still count, but stars come when the timer is done.'), c.reqMins ? h('button', { class: 'btn ghost small', onclick: function () { UI.requirePin(function () { c.override = true; doneB.dataset.early = '1'; paint(); }); } }, '🔒 Parent: allow finishing now') : h('button', { class: 'btn ghost small', onclick: function () { doneB.dataset.early = '1'; paint(); } }, 'Let me finish early'))], [doneB]);
@@ -824,14 +868,17 @@
   // ============================== JOURNAL ==============================
   function startJournal(L, c) {
     var st = Store.state, rec = st.writing[L.id] || (st.writing[L.id] = { kind: 'journal', title: L.title, prompt: L.prompt, text: '', status: 'draft', ts: Store.now(), lesson: L.id, _u: 0 });
-    var ta = h('textarea', { class: 'ans journal', 'aria-label': 'Your journal entry', autocapitalize: 'sentences' }), wc = h('div', { class: 'small muted' }), go = btn('Turn it in', function () { rec.text = ta.value; rec.status = rec.status === 'reviewed' ? 'reviewed' : 'submitted'; rec.date = c.date; rec._u = Store.now(); award(c, 6, 'Journal entry'); c.total = 1; c.right1 = 1; finishLesson(c, {}); }, 'gold'), timer = null;
+    var ta = h('textarea', { class: 'ans journal', 'aria-label': 'Your journal entry', autocapitalize: 'sentences' }), wc = h('div', { class: 'small muted' }), go = btn('Turn it in', function () { var rs = writingHints(ta.value); if (rs.length && anyway !== ta.value && hinted !== ta.value) { showHints(rs); return; } if (rs.length) anyway = ta.value; turnIn(); }, 'gold'), hinted = null, timer = null, anyway = null, hintBox = h('div', { class: 'hint-box' });
+    function turnIn() { rec.text = ta.value; rec.status = rec.status === 'reviewed' ? 'reviewed' : 'submitted'; rec.date = c.date; rec._u = Store.now(); if (anyway === ta.value && writingHints(ta.value).length) rec.hintsSkipped = true; award(c, 6, 'Journal entry'); c.total = 1; c.right1 = 1; finishLesson(c, {}); }
+    function showHints(rs) { hintBox.innerHTML = ''; hinted = rs.length ? ta.value : null; go.textContent = rs.length ? 'Turn it in anyway' : 'Turn it in'; hintBox.appendChild(hintsNode(rs, { lead: 'Nice work so far! Before you turn it in, take a look at these. Fix what you can, or tap Turn it in anyway.', fix: function () { hintBox.innerHTML = ''; ta.focus(); } })); chk.disabled = true; if (hintBox.scrollIntoView) try { hintBox.scrollIntoView({ block: 'nearest' }); } catch (e) { } }
+    var chk = btn('Check my writing', function () { showHints(writingHints(ta.value)); }, 'ghost');
     ta.value = rec.text || '';
     function upd() { var n = UI.wordCount(ta.value); wc.textContent = n + ' words (at least ' + L.min + ')'; wc.style.color = n >= L.min ? 'var(--good)' : 'var(--muted)'; go.disabled = n < L.min; }
-    ta.addEventListener('input', function () { upd(); clearTimeout(timer); timer = setTimeout(function () { rec.text = ta.value; rec._u = Store.now(); Store.save(); }, 600); });
+    ta.addEventListener('input', function () { upd(); chk.disabled = !ta.value.trim(); if (hinted !== null && ta.value !== hinted) { hinted = null; go.textContent = 'Turn it in'; } clearTimeout(timer); timer = setTimeout(function () { rec.text = ta.value; rec._u = Store.now(); Store.save(); }, 600); });
     show([h('div', { class: 'card' }, h('span', { class: 'badge' }, '📝 Today\'s prompt'), h('p', { class: 'prompt' }, L.prompt), UI.canSpeak() ? UI.speakBtn(L.prompt, 'Read it to me') : null),
       h('details', { class: 'card' }, h('summary', { style: { fontWeight: 700, cursor: 'pointer' } }, 'Stuck? Ideas to get started'), h('ul', null, h('li', null, 'Start with WHO, WHERE, and WHEN.'), h('li', null, 'Add what you saw, heard, and felt.'), h('li', null, 'Give a reason with "because" and an example with "for example."'), h('li', null, 'End with how you feel or what you learned.'))),
-      ta, wc, h('p', { class: 'muted small' }, 'Your writing saves as you type. You can use the iPad microphone key to speak your words, then fix them.')], [go]);
-    upd();
+      ta, wc, hintBox, h('p', { class: 'muted small' }, 'Your writing saves as you type. You can use the iPad microphone key to speak your words, then fix them.')], [chk, go]);
+    upd(); chk.disabled = !ta.value.trim();
   }
 
   // Status of every block for a date: minutes logged and whether its lessons are done.

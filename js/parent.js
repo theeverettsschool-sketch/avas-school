@@ -20,8 +20,8 @@
       var badge = t[0] === 'review' && Parent.reviewCount() ? ' (' + Parent.reviewCount() + ')' : t[0] === 'backup' && Parent.backupDue() ? ' •' : '';
       return h('button', { role: 'tab', 'aria-selected': Parent.tab === t[0] ? 'true' : 'false', onclick: function () { Parent.tab = t[0]; Parent.render(); } }, t[1] + badge);
     }));
-    var fn = { report: function () { var b = h('div'); Finish.report(b); return b; }, overview: overview, review: review, progress: progress, pay: pay, backup: backup, settings: settings, help: help }[Parent.tab];
-    body.appendChild(fn());
+    var fn = { report: function () { var b = h('div'); Finish.report(b); return b; }, overview: overview, review: review, progress: progress, pay: pay, backup: backup, settings: settings, help: help }[Parent.tab] || overview;
+    try { body.appendChild(fn()); } catch (e) { body.appendChild(errCard((TABS.filter(function (t) { return t[0] === Parent.tab; })[0] || [0, 'This tab'])[1], e)); }
     UI.render(Home.topbar(), h('main', { class: 'wrap wide' }, h('h1', { style: { marginTop: '18px' } }, 'Parent area'), tabs, body));
   };
 
@@ -53,6 +53,7 @@
     var st = S(), today = UI.today(), wk = Store.mondayOf(today), m = Store.weekMoney(wk), proj = Cal.projection(0, st.settings), counted = Store.daysCounted(), thr = Store.threshold();
     var info = Plan.forDate(today, st.settings), doneToday = info.lessons.filter(function (l) { return st.progress[l.id] && st.progress[l.id].done; }).length, minsToday = Store.dayMinutes(today);
     var box = h('div');
+    card(box, 'This week', function (b) { b.appendChild(weekCard()); });
     if (Parent.backupDue()) box.appendChild(h('div', { class: 'fb info' }, h('b', { class: 'h' }, 'Backup reminder'), 'There is new progress since your last saved copy. ', h('button', { class: 'btn small', onclick: function () { Parent.tab = 'backup'; Parent.render(); } }, 'Go to Backup')));
     box.appendChild(h('div', { class: 'row', style: { alignItems: 'stretch' } }, stat('Today', minsToday + ' / ' + thr + ' min', doneToday + ' of ' + info.lessons.length + ' lessons done' + (Store.dayCounts(today) ? ', day counts ✓' : '')), stat('Stars this week', m.stars, UI.money(m.usd) + (m.capped ? ' (capped)' : '')), stat('Owed to her', UI.money(Store.totalOwed()), 'from unpaid weeks'), stat('Days counted', counted + ' / 180', 'a day counts at ' + thr + ' minutes')));
     box.appendChild(hoursCard());
@@ -64,10 +65,15 @@
       h('div', { class: 'row' }, dateIn, minsIn, h('span', null, 'minutes of'), subj), h('div', { style: { marginTop: '8px' } }, noteIn),
       h('div', { class: 'row', style: { marginTop: '10px' } }, h('button', { class: 'btn small gold', onclick: function () { var n = Math.max(0, Math.min(600, Math.round(+minsIn.value || 0))); if (!n || !dateIn.value) return UI.toast('Enter minutes and a date.'); var o = OFFLINE.filter(function (x) { return x[0] === subj.value; })[0]; Store.addTime({ date: dateIn.value, secs: n * 60, subject: o[0], block: o[2], src: 'parent', note: noteIn.value.trim() }); UI.commit(); UI.toast(n + ' minutes added. ' + (Store.dayCounts(dateIn.value) ? 'That day now counts toward the 180.' : Store.dayMinutes(dateIn.value) + ' of ' + thr + ' minutes so far that day.'), 4000); Parent.render(); } }, 'Add minutes')),
       pEntries.length ? h('table', { style: { marginTop: '10px' } }, h('tbody', null, pEntries.slice(0, 10).map(function (e) { return h('tr', null, h('td', null, Cal.short(e.date)), h('td', null, Math.round(e.secs / 60) + ' min'), h('td', null, UI.subjectName(e.subject)), h('td', { class: 'muted' }, e.note || ''), h('td', null, h('button', { class: 'btn small ghost', onclick: function () { UI.confirm('Remove these minutes?', Math.round(e.secs / 60) + ' minutes on ' + Cal.pretty(e.date) + '.', 'Remove', function () { Store.removeTime(e.id); UI.commit(); Parent.render(); }); } }, 'Remove'))); }))) : null));
-    // 180-day projection
-    box.appendChild(h('div', { class: 'card' }, h('h3', null, '180-day plan'), h('p', null, 'Fulton calendar days from ', Cal.pretty(Cal.START), ' through May 27: ', h('b', null, proj.scheduledByMay27), '. Georgia needs 180 total school days in your home-study year.'),
-      h('p', null, st.settings.priorDays ? 'You entered ' + st.settings.priorDays + ' days already completed earlier this year. ' : 'You have not entered earlier days yet (Settings → Calendar). ', 'With those, you are short by about ', h('b', null, Math.max(0, 180 - (st.settings.priorDays || 0) - proj.scheduledByMay27)), ' days. ',
-        (180 - (st.settings.priorDays || 0) - proj.scheduledByMay27) > 0 ? 'Add make-up days (Saturdays, breaks, summer) in Settings → Calendar. Without make-up days the 180th day lands on ' + Cal.pretty(Cal.dateOfDay(180 - (st.settings.priorDays || 0), st.settings) || '2027-07-30') + '.' : 'You are on track.')));
+    // 180-day projection (v11: uses the make-up planner's numbers, so priorDays and added make-up days are counted)
+    card(box, '180-day plan', function (box) {
+      var P = Planner.status(today, st.settings), sug = P.short ? Planner.suggestions(today, st.settings) : [];
+      box.appendChild(h('div', { class: 'card', id: 'plan180' }, h('h3', null, '180-day plan'), h('p', null, 'Fulton calendar days from ', Cal.pretty(Cal.startOf(st.settings)), ' through May 27 (with make-up days you added): ', h('b', null, P.inYear), '. Georgia needs 180 total school days in your home-study year.'),
+        h('p', null, P.prior ? 'You entered ' + P.prior + ' days already completed earlier this year. ' : 'You have not entered earlier days yet (Settings → Calendar). ', P.summer ? 'Summer make-up days added: ' + P.summer + '. ' : '', 'Planned so far: ', h('b', null, P.planned + ' of 180'), '. ',
+          P.short ? h('span', null, 'Short by ', h('b', null, P.short), ' day' + (P.short === 1 ? '' : 's') + '. Next suggested make-up days: ' + sug.slice(0, 4).map(function (x) { return Cal.short(x.date); }).join(', ') + (sug.length > 4 ? '…' : '') + '. ') : 'You are on track. ',
+          h('button', { class: 'btn small', onclick: function () { Parent.tab = 'settings'; Parent.render(); setTimeout(function () { var el = document.getElementById('makeup-planner'); if (el && el.scrollIntoView) el.scrollIntoView(); }, 50); } }, 'Open make-up planner')),
+        h('p', { class: 'small muted' }, 'Counted so far: ' + P.counted + ' of 180.')));
+    });
     // weak spots
     var weak = Store.weakSkills(), rushed = Object.keys(st.progress).filter(function (k) { return st.progress[k].rushed >= 3; });
     box.appendChild(h('div', { class: 'card' }, h('h3', null, 'Skills to watch'), weak.length ? h('table', null, h('tbody', null, weak.map(function (w) { return h('tr', null, h('td', null, w.skill.replace(/-/g, ' ')), h('td', null, w.pct + '% right'), h('td', { class: 'muted' }, w.tries + ' tries')); }))) : h('p', { class: 'muted' }, 'Nothing flagged yet. Skills show here once she has 4+ tries at 70% or lower. They also come back automatically as warm-ups.'),
@@ -100,6 +106,7 @@
   function progress() {
     var P = S().progress, rows = Object.keys(P).filter(function (k) { return P[k].done; }).map(function (k) { return Object.assign({ id: k }, P[k]); }).sort(function (a, b) { return (b.date || '').localeCompare(a.date || ''); });
     var box = h('div');
+    card(box, 'Quizzes and tests', function (b) { b.appendChild(assessCard()); });
     box.appendChild(h('div', { class: 'card' }, h('h3', null, 'Lessons finished (' + rows.length + ')'), rows.length ? h('table', null, h('thead', null, h('tr', null, ['Date', 'Lesson', 'First-try', 'Time', 'Notes'].map(function (x) { return h('th', null, x); }))), h('tbody', null, rows.map(function (r) { var L = Plan.find(r.id); return h('tr', null, h('td', null, r.date), h('td', null, (L ? L.title : r.id) + (/^x-/.test(r.id) ? ' (extra)' : '')), h('td', null, r.total ? r.right + '/' + r.total : '-'), h('td', null, Math.round((r.secs || 0) / 60) + ' min'), h('td', null, [r.mastered === false ? h('span', { class: 'badge warn' }, 'needs review') : null, r.rushed >= 3 ? h('span', { class: 'badge bad' }, 'rushing') : null, r.hints ? h('span', { class: 'badge' }, r.hints + ' hints') : null])); }))) : h('p', { class: 'muted' }, 'No lessons finished yet.')));
     var sk = S().skills, ks = Object.keys(sk).sort();
     box.appendChild(h('div', { class: 'card' }, h('h3', null, 'Skills'), ks.length ? h('table', null, h('tbody', null, ks.map(function (k) { var t = sk[k].right + sk[k].wrong; return h('tr', null, h('td', null, k.replace(/-/g, ' ')), h('td', null, Math.round(100 * sk[k].right / t) + '%'), h('td', { class: 'muted' }, t + ' problems')); }))) : h('p', { class: 'muted' }, 'Skill tracking starts once she answers math problems.')));
@@ -142,12 +149,64 @@
     return box;
   }
 
+
+  // ============ v11: make-up day planner (Settings → Calendar) ============
+  function makeupPlanner() {
+    var st = S(), today = UI.today(), P = Planner.status(today, st.settings), sug = Planner.suggestions(today, st.settings), box = h('div', { class: 'card', id: 'makeup-planner' });
+    box.appendChild(h('h3', null, '📅 Make-up day planner'));
+    box.appendChild(h('p', { class: 'small muted' }, 'Georgia needs 180 school days. This counts the ' + P.prior + ' day' + (P.prior === 1 ? '' : 's') + ' you entered from earlier this year' + (P.prior ? '' : ' (enter them above under "School days already completed")') + ', the Fulton school days from ' + Cal.pretty(Cal.startOf(st.settings)) + ' through ' + Cal.pretty(Cal.LAST_DAY) + ' (including make-up days you added), and any summer make-up days.'));
+    function meter(label, pct, txt) { return h('div', { style: { margin: '6px 0' } }, h('div', { class: 'small' }, label + ': ', h('b', null, txt)), h('div', { class: 'meter-bar light', role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': pct, 'aria-label': label }, h('i', { style: { width: pct + '%', background: 'var(--good, #2e9e5b)' } }))); }
+    box.appendChild(meter('Planned', P.pctPlanned, P.planned + ' of 180 days (' + P.prior + ' earlier + ' + P.inYear + ' Fulton days' + (P.summer ? ' + ' + P.summer + ' summer' : '') + ')'));
+    box.appendChild(meter('Counted so far', P.pctCounted, P.counted + ' of 180 days'));
+    box.appendChild(h('p', { id: 'makeup-short' }, P.short ? h('span', null, 'Short by ', h('b', null, P.short), ' day' + (P.short === 1 ? '' : 's') + '. Here are ' + sug.length + ' suggested make-up days (Saturdays and Fulton break days after today, then summer). Tap Add for the ones that work for your family.') : h('span', null, '✅ You have enough days planned to reach 180. ' + P.makeupAdded + ' make-up day' + (P.makeupAdded === 1 ? '' : 's') + ' added.')));
+    if (sug.length) {
+      box.appendChild(h('div', { class: 'row' }, h('button', { class: 'btn small gold', id: 'makeup-add-all', onclick: function () { UI.confirm('Add all ' + sug.length + ' suggested days?', 'They become school days with lessons. You can remove any of them later in the Calendar card.', 'Add all', function () { Planner.addAll(sug); UI.commit(); UI.toast(sug.length + ' make-up days added.'); Parent.render(); }); } }, 'Add all suggested (' + sug.length + ')')));
+      box.appendChild(h('table', { class: 'makeup-table', style: { marginTop: '8px' } }, h('tbody', null, sug.map(function (x) { return h('tr', null, h('td', null, Cal.pretty(x.date)), h('td', { class: 'muted small' }, x.why), h('td', null, h('button', { class: 'btn small', 'data-addmk': x.date, onclick: function () { Planner.setMakeup(x.date, true); UI.commit(); UI.toast('Added ' + Cal.pretty(x.date) + '.'); Parent.render(); } }, 'Add'))); }))));
+    }
+    return box;
+  }
+  Parent.makeupPlanner = makeupPlanner;
+
+  // ============ v11: "This week" summary (top of Overview) ============
+  function weekCard() {
+    var r = Planner.weekSummary(UI.today()), msg = h('span', { class: 'small muted', style: { marginLeft: '8px' } });
+    function copy() {
+      var done = function () { msg.textContent = 'Copied ✓'; UI.toast('Summary copied.'); };
+      try { if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(r.text).then(done, fallback); } catch (e) { }
+      fallback();
+      function fallback() { var ta = h('textarea', { style: { position: 'fixed', top: '-1000px' } }); ta.value = r.text; document.body.appendChild(ta); ta.select(); var ok = false; try { ok = document.execCommand('copy'); } catch (e) { } ta.remove(); if (ok) done(); else { msg.textContent = 'Could not copy automatically. Select the text below and copy it.'; pre.open = true; } }
+    }
+    var pre = h('details', { class: 'no-print' }, h('summary', { style: { cursor: 'pointer' } }, 'Show as plain text'), h('pre', { id: 'week-text', style: { whiteSpace: 'pre-wrap', fontSize: '.85rem' } }, r.text));
+    return h('div', { class: 'card week-summary', id: 'week-summary' },
+      h('h3', null, '🗓️ This week (' + Cal.short(r.week) + ' to ' + Cal.short(r.through) + ')'),
+      h('div', { class: 'row', style: { alignItems: 'stretch' } }, stat('Hours this week', fmtMins(r.totalMins), r.lessons + ' lessons finished'), stat('Days counted', r.counted + ' this week', r.daysCounted + ' of 180 this year'), stat('Stars', r.stars, UI.money(r.usd) + (r.capped ? ' (max)' : '') + (r.paid ? ' · paid' : ''))),
+      h('table', { style: { marginTop: '10px' } }, h('thead', null, h('tr', null, ['Day', 'Time', 'Counts'].map(function (x) { return h('th', null, x); }))), h('tbody', null, r.days.map(function (d) { return h('tr', null, h('td', null, d.label), h('td', null, fmtMins(d.mins)), h('td', null, d.counts ? '✓' : d.future ? 'coming up' : '')); }))),
+      h('h4', { style: { margin: '12px 0 4px' } }, 'Quizzes and tests'), r.scores.length ? h('table', null, h('tbody', null, r.scores.map(function (x) { return h('tr', null, h('td', null, x.kind + ' · ' + Cal.short(x.date)), h('td', null, h('b', null, x.pct + '%'), ' (' + x.right + '/' + x.total + ' first try)'), h('td', { class: 'muted small' }, x.missed ? x.missed + ' to practice' : 'no misses')); }))) : h('p', { class: 'small muted' }, 'No quiz or test finished yet this week.'),
+      h('h4', { style: { margin: '12px 0 4px' } }, 'Flagged or redo items'), r.flags.length ? h('ul', { class: 'small' }, r.flags.map(function (f) { return h('li', null, Cal.short(f.date) + ' ' + f.kind + ': ' + f.title + ' (' + f.state + ')'); })) : h('p', { class: 'small muted' }, 'Nothing flagged this week.'),
+      h('div', { class: 'row no-print', style: { marginTop: '10px' } }, h('button', { class: 'btn small gold', id: 'copy-summary', onclick: copy }, '📋 Copy summary'), h('button', { class: 'btn small ghost', id: 'print-summary', onclick: function () { document.body.classList.add('print-week'); var off = function () { document.body.classList.remove('print-week'); window.removeEventListener('afterprint', off); }; window.addEventListener('afterprint', off); setTimeout(function () { window.print(); setTimeout(off, 1500); }, 30); } }, '🖨️ Download PDF / print'), msg), pre);
+  }
+  Parent.weekCard = weekCard;
+  // quiz and test scores (Parent → Progress, annual report)
+  function assessCard() {
+    var R = root.Assess ? Assess.results(S()) : [];
+    return h('div', { class: 'card', id: 'assess-scores' }, h('h3', null, 'Quizzes and tests (' + R.length + ')'), R.length ? h('table', null, h('thead', null, h('tr', null, ['Date', 'Kind', 'First-try score', 'Time', 'Missed'].map(function (x) { return h('th', null, x); }))), h('tbody', null, R.map(function (x) { var L = Plan.find(x.id); return h('tr', null, h('td', null, x.date), h('td', null, L ? L.title : x.kind), h('td', null, h('b', null, x.pct + '%'), ' (' + x.right + '/' + x.total + ')'), h('td', null, x.mins + ' min'), h('td', null, x.missed ? x.missed + ' (practice later)' : '-')); }))) : h('p', { class: 'muted' }, 'The weekly quiz is on the last school day of each week, and the monthly test on the last school day of each month.'));
+  }
+  Parent.assessCard = assessCard;
+
+  // v11: one card that fails shows a small note instead of breaking the whole tab (Safari once refused to open Settings)
+  function errCard(title, e) { try { console.error(e); } catch (x) { } return h('div', { class: 'card err-card' }, h('h3', null, title), h('p', { class: 'small', style: { color: 'var(--bad)' } }, 'This part could not load: ' + ((e && e.message) || String(e)) + '. The rest of the page still works. Reloading usually fixes it.')); }
+  Parent.errCard = errCard;
+  function card(box, title, fn) { var sub = h('div'); try { fn(sub); while (sub.firstChild) box.appendChild(sub.firstChild); } catch (e) { box.appendChild(errCard(title, e)); } }
+  Parent._card = card;
   // ============ SETTINGS ============
   function settings() {
-    var st = S(), box = h('div'), cfg = loadCfg();
+    var st = S(), box = h('div'), cfg = {}; try { cfg = loadCfg() || {}; } catch (e) { cfg = {}; }
+    card(box, 'Profile and PIN', function (box) {
     var nm = h('input', { class: 'f-in', value: st.profile.name, 'aria-label': 'Her first name' });
     box.appendChild(h('div', { class: 'card' }, h('h3', null, 'Profile and PIN'), h('label', { class: 'f' }, 'First name'), nm, h('div', { class: 'row', style: { marginTop: '10px' } }, h('button', { class: 'btn small', onclick: function () { st.profile.name = nm.value.trim(); UI.commit(); UI.toast('Saved.'); } }, 'Save name'), h('button', { class: 'btn small ghost', onclick: changePin }, 'Change PIN')),
       h('div', { class: 'row', style: { marginTop: '10px' } }, toggle('Sound effects', st.settings.sound !== false, function (v) { st.settings.sound = v; st.settings._u = Store.now(); UI.commit(); }), toggle('Read questions aloud button', st.settings.readAloud !== false, function (v) { st.settings.readAloud = v; st.settings._u = Store.now(); UI.commit(); }), toggle('Read words aloud automatically', !!st.settings.autoSpeak, function (v) { st.settings.autoSpeak = v; st.settings._u = Store.now(); UI.commit(); }))));
+    });
+    card(box, 'Cloud sync', function (box) {
     // cloud sync
     var key = h('input', { class: 'f-in', value: cfg.apiKey || '', placeholder: 'AIzaSy...', 'aria-label': 'Firebase API key' }), pid = h('input', { class: 'f-in', value: cfg.projectId || '', placeholder: 'your-project-id', 'aria-label': 'Firebase project ID' }), em = h('input', { class: 'f-in', type: 'email', value: (Sync.auth && Sync.auth.email) || '', placeholder: 'family email', 'aria-label': 'Family email', autocomplete: 'username' }), pw = h('input', { class: 'f-in', type: 'password', placeholder: 'password (6+ characters)', 'aria-label': 'Family password', autocomplete: 'current-password' }), msg = h('p', { class: 'small' });
     function applyCfg() { saveCfg({ apiKey: key.value.trim(), projectId: pid.value.trim() }); Sync.config({ apiKey: key.value, projectId: pid.value }); }
@@ -155,26 +214,40 @@
     box.appendChild(h('div', { class: 'card' }, h('h3', null, 'Cloud sync (iPad + MacBook)'), h('p', { class: 'small muted' }, Sync.auth ? 'Signed in as ' + Sync.auth.email + '. Status: ' + Sync.status + (Sync.last ? ' · last sync ' + new Date(Sync.last).toLocaleTimeString() : '') + (Sync.error ? ' · ' + Sync.error : '') : 'Follow SETUP.md Part 2 (about 10 minutes, free). Then enter the two values below and create the family login. On the second device, enter the same values and use Sign in.'),
       h('label', { class: 'f' }, 'Firebase API key'), key, h('label', { class: 'f' }, 'Firebase project ID'), pid, h('label', { class: 'f' }, 'Family email'), em, h('label', { class: 'f' }, 'Family password'), pw,
       h('div', { class: 'row', style: { marginTop: '10px' } }, h('button', { class: 'btn small gold', onclick: function () { run(function () { return Sync.signUp(em.value.trim(), pw.value); }, 'Account created.'); } }, 'Create family login'), h('button', { class: 'btn small', onclick: function () { run(function () { return Sync.signIn(em.value.trim(), pw.value); }, 'Signed in.'); } }, 'Sign in'), Sync.auth ? h('button', { class: 'btn small ghost', onclick: function () { msg.textContent = 'Syncing…'; Sync.syncNow().then(function (r) { msg.textContent = r.ok ? 'Synced just now.' : 'Could not sync: ' + r.reason; Parent.render(); }); } }, 'Sync now') : null, Sync.auth ? h('button', { class: 'btn small ghost', onclick: function () { Sync.signOut(); Parent.render(); } }, 'Sign out') : null), msg));
+    });
+    card(box, 'School day', function (box) {
     // school day
     var thrIn = h('input', { class: 'f-in', type: 'number', min: 30, max: 600, value: Store.threshold(), style: { width: '110px' }, 'aria-label': 'Minutes for a day to count' }), startIn = h('input', { class: 'f-in', type: 'time', value: st.settings.dayStart || '08:30', style: { width: '140px' }, 'aria-label': 'School day start time' });
     box.appendChild(h('div', { class: 'card' }, h('h3', null, 'School day'), h('p', { class: 'small muted' }, 'A day counts toward the 180 when its learning time (app timers + lessons + minutes you add) reaches this many minutes. Georgia home study requires 4.5 hours (270 minutes) a day.'),
       h('div', { class: 'row' }, h('label', null, 'Minutes for a day to count: '), thrIn, h('label', null, 'Day starts at: '), startIn, h('button', { class: 'btn small', onclick: function () { st.settings.dayMinutes = Math.max(30, Math.min(600, Math.round(+thrIn.value || 270))); if (/^\d{2}:\d{2}$/.test(startIn.value)) st.settings.dayStart = startIn.value; st.settings._u = Store.now(); UI.commit(); UI.toast('Saved.'); Parent.render(); } }, 'Save'))));
+    });
+    card(box, 'Required time', function (box) {
     box.appendChild(reqTimeCard());
+    });
+    card(box, 'Finish my day review', function (box) {
     box.appendChild(Finish.settingsCard());
+    });
+    card(box, 'Calendar', function (box) {
     // calendar
     var prior = h('input', { class: 'f-in', type: 'number', min: 0, max: 180, value: st.settings.priorDays || 0, style: { width: '110px' }, 'aria-label': 'School days already completed' }), off = h('input', { class: 'f-in', type: 'date', 'aria-label': 'Extra day off' }), mk = h('input', { class: 'f-in', type: 'date', 'aria-label': 'Make-up school day' });
     box.appendChild(h('div', { class: 'card' }, h('h3', null, 'Calendar'), h('p', { class: 'small muted' }, 'The app follows the official Fulton County 2026-27 calendar (breaks and holidays are already off). Her first day is ' + Cal.pretty(Cal.startOf(st.settings)) + '.'),
       h('label', { class: 'f' }, 'First school day (the Past days tab lists every school day from here)'), (function () { var sd = h('input', { class: 'f-in', type: 'date', value: Cal.startOf(st.settings), style: { width: '180px' }, 'aria-label': 'First school day' }); return h('div', { class: 'row' }, sd, h('button', { class: 'btn small', onclick: function () { if (!/^\d{4}-\d\d-\d\d$/.test(sd.value)) return UI.toast('Pick a date.'); var go = function () { st.settings.startDate = sd.value; st.settings._u = Store.now(); UI.commit(); UI.toast('First school day saved.'); Parent.render(); }; if (sd.value === Cal.startOf(st.settings)) return go(); UI.confirm('Change the first school day?', 'Lessons follow the school-day number, so changing this moves which lessons belong to which date. Finished lessons stay finished and minutes already logged stay on their dates.', 'Change it', go); } }, 'Save')); })(),
       h('label', { class: 'f' }, 'School days already completed before ' + Cal.START + ' (this home-study year)'), h('div', { class: 'row' }, prior, h('button', { class: 'btn small', onclick: function () { st.settings.priorDays = Math.max(0, +prior.value || 0); st.settings._u = Store.now(); UI.commit(); UI.toast('Saved.'); Parent.render(); } }, 'Save')),
       h('label', { class: 'f' }, 'Add a day off (sick day, trip)'), h('div', { class: 'row' }, off, h('button', { class: 'btn small', onclick: function () { if (off.value) { st.settings.extraOff = (st.settings.extraOff || []).concat([off.value]); st.settings._u = Store.now(); UI.commit(); Parent.render(); } } }, 'Add')),
-      h('label', { class: 'f' }, 'Add a make-up school day (Saturday, break day)'), h('div', { class: 'row' }, mk, h('button', { class: 'btn small', onclick: function () { if (mk.value) { st.settings.makeup = (st.settings.makeup || []).concat([mk.value]); st.settings._u = Store.now(); UI.commit(); Parent.render(); } } }, 'Add')),
-      h('p', { class: 'small' }, 'Days off: ' + ((st.settings.extraOff || []).join(', ') || 'none') + '. Make-up days: ' + ((st.settings.makeup || []).join(', ') || 'none') + '.')));
+      h('label', { class: 'f' }, 'Add a make-up school day (Saturday, break day)'), h('div', { class: 'row' }, mk, h('button', { class: 'btn small', onclick: function () { if (mk.value) { Planner.setMakeup(mk.value, true); UI.commit(); Parent.render(); } } }, 'Add')),
+      h('p', { class: 'small' }, 'Days off: ' + ((st.settings.extraOff || []).join(', ') || 'none') + '.'), h('div', { class: 'small', id: 'makeup-list' }, 'Make-up days: ', (st.settings.makeup || []).length ? (st.settings.makeup || []).slice().sort().map(function (d) { return h('span', { class: 'badge', style: { margin: '2px 4px 2px 0', display: 'inline-block' } }, Cal.short(d) + ' ', h('button', { class: 'linkish', type: 'button', 'aria-label': 'Remove make-up day ' + d, style: { border: 0, background: 'none', cursor: 'pointer', padding: '0 2px' }, onclick: function () { UI.confirm('Remove this make-up day?', Cal.pretty(d) + ' will go back to a day off.', 'Remove', function () { Planner.setMakeup(d, false); UI.commit(); Parent.render(); }); } }, '×')); }) : 'none')));
+    });
+    card(box, 'Make-up day planner', function (box) { box.appendChild(makeupPlanner()); });
+    card(box, 'NIV memory verses', function (box) {
     // NIV
     var vs = {}; Object.keys(Content.lessons).forEach(function (id) { var l = Content.lessons[id]; if (l.type === 'bible') { vs[l.verse.ref] = 1; } });
     var B = (Content.bank && Content.bank.bible) || {}; Object.keys(B).sort(function (a, b) { return a - b; }).forEach(function (w) { vs[B[w].verse.ref] = 1; });
     var rows = Object.keys(vs).map(function (ref) { var ta = h('textarea', { class: 'f-in', rows: 2, 'aria-label': 'NIV text for ' + ref }); ta.value = (st.parentVerses && st.parentVerses[ref]) || ''; ta.addEventListener('change', function () { st.parentVerses = st.parentVerses || {}; st.parentVerses[ref] = ta.value.trim(); if (!ta.value.trim()) delete st.parentVerses[ref]; UI.commit(); }); return h('div', null, h('label', { class: 'f' }, ref + '  ', h('a', { href: Scripture.nivLink(ref), target: '_blank', rel: 'noopener' }, 'open NIV ↗')), ta); });
     box.appendChild(h('div', { class: 'card' }, h('h3', null, 'NIV memory verses'), h('p', { class: 'small muted' }, 'The NIV is copyrighted, so it cannot be built into the app. Weeks 1–4 show the public-domain WEB text. From week 5 she reads each day\'s passage in her own Bible (or the "Open in NIV" link). To let her practice typing a memory verse from memory, tap the link, copy the verse, and paste it here. It is stored only in your family data.'), h('details', null, h('summary', { style: { fontWeight: 700, cursor: 'pointer' } }, 'Show all ' + Object.keys(vs).length + ' memory verses'), rows)));
+    });
+    card(box, 'Reset', function (box) {
     box.appendChild(h('div', { class: 'card' }, h('h3', null, 'Reset'), h('p', { class: 'small muted' }, 'Erase everything on THIS device. If cloud sync is on, the cloud copy stays and this device will pull it back. Download a backup first.'), h('button', { class: 'btn small ghost', onclick: function () { UI.confirm('Erase this device?', 'Progress on this device will be removed. Make sure you have a backup.', 'Erase', function () { localStorage.removeItem('avaSchool.state.v1'); Store.state = Store.blank(); location.hash = '#/'; location.reload(); }); } }, 'Erase this device')));
+    });
     return box;
   }
   // ============ v4: required time per assignment ============
@@ -252,6 +325,7 @@
         h('h1', null, 'Home Study Annual Progress Report'), h('p', null, h('b', null, 'Student: '), st.profile.name, '   ', h('b', null, 'Grade: '), '4   ', h('b', null, 'Year: '), '2026–2027   ', h('b', null, 'Generated: '), UI.today()),
         h('div', { class: 'card' }, h('h3', null, 'Attendance'), h('p', null, 'Days counted: ', h('b', null, counted), ' (includes ' + (st.settings.priorDays || 0) + ' entered from earlier in the year). A day counts at ' + Store.threshold() + ' minutes. Hours recorded: ', h('b', null, hrs), ', including learning away from the app added by the parent. A separate hours report is in Parent → Overview.'), h('table', null, h('thead', null, h('tr', null, ['Date', 'Minutes', 'Counted'].map(function (x) { return h('th', null, x); }))), h('tbody', null, dates.map(function (d) { return h('tr', null, h('td', null, d), h('td', null, Store.dayMinutes(d)), h('td', null, Store.dayCounts(d) ? 'Yes' : 'No')); })))),
         h('div', { class: 'card' }, h('h3', null, 'Subjects covered (lessons completed)'), h('table', null, h('tbody', null, ['reading', 'grammar', 'spelling', 'writing', 'math', 'social', 'science', 'bible', 'fun', 'pe', 'arts'].map(function (s) { return h('tr', null, h('td', null, UI.subjectName(s)), h('td', null, subj[s] || 0)); })))),
+        (function () { try { return assessCard(); } catch (e) { return errCard('Quizzes and tests', e); } })(),
         h('div', { class: 'card' }, h('h3', null, 'Lesson log'), h('table', null, h('thead', null, h('tr', null, ['Date', 'Subject', 'Lesson', 'Result'].map(function (x) { return h('th', null, x); }))), h('tbody', null, Object.keys(P).filter(function (k) { return P[k].done; }).sort(function (a, b) { return (P[a].date || '').localeCompare(P[b].date || ''); }).map(function (k) { var L = Plan.find(k); return h('tr', null, h('td', null, P[k].date), h('td', null, UI.subjectName(P[k].subject)), h('td', null, L ? L.title : k), h('td', null, P[k].total ? P[k].right + '/' + P[k].total + ' first try' : 'Completed')); })))),
         h('div', { class: 'card' }, h('p', null, 'Parent/guardian signature: ______________________________   Date: ______________'))));
     }, function () { UI.go('/'); });

@@ -39,6 +39,8 @@
 
   // sync: on open, when the tab comes back, and every few minutes
   function trySync() { if (Sync.cfg && Sync.auth) Sync.syncNow().then(function (r) { if (r.ok && (location.hash === '' || location.hash === '#/')) Home.render(); }); }
+  // v11: also sync right after "Finish my day" (and anything else that calls App.syncSoon), a moment after the save
+  var soonT = null; window.App = window.App || {}; App.syncSoon = function (why) { App.lastSyncReason = why || ''; clearTimeout(soonT); soonT = setTimeout(trySync, 1500); }; App.trySync = trySync;
   document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') trySync(); });
   setInterval(function () { if (document.visibilityState === 'visible') trySync(); }, 180000);
   window.addEventListener('online', trySync);

@@ -46,7 +46,7 @@
     var T = Store.threshold(), mins = Store.dayMinutes(date);
     if (!out.length && (mins >= T || rev.endedByParent)) {
       main.appendChild(h('div', { class: 'cele', id: 'all-done' }, h('div', { class: 'big' }, '🎉'), h('h1', null, 'Your school day is done!'), h('p', null, mins + ' minutes of learning' + (rev.endedByParent && mins < T ? ' (your parent ended the day)' : '') + '. Every assignment is checked and fixed. "Whatever you do, work at it with all your heart." (Colossians 3:23)'), h('a', { class: 'btn gold', href: backHref(date) }, 'Back')));
-      if (!rev.celebrated) { rev.celebrated = true; rev._u = Store.now(); UI.commit(); if (root.Fx) Fx.confetti(120); UI.sound && UI.sound('win'); }
+      if (!rev.celebrated) { rev.celebrated = true; rev._u = Store.now(); UI.commit(); if (root.Fx) Fx.confetti(120); UI.sound && UI.sound('win'); if (root.App && App.syncSoon) App.syncSoon('finish'); }
     } else if (!out.length) {
       main.appendChild(h('div', { class: 'card', id: 'practice-card', style: { textAlign: 'center' } }, h('h2', null, '✅ Corrections done!'), h('p', null, 'You have ' + mins + ' of ' + T + ' minutes today. Practice rounds fill the last ' + (T - mins) + ' minutes, mixing subjects (your trickiest ones first). Small bonus stars for correct answers.'),
         h('a', { class: 'btn gold big', href: '#/practice/' + date, id: 'practice-btn' }, '⭐ Start practice rounds (' + (T - mins) + ' min)'),

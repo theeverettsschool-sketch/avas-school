@@ -206,3 +206,20 @@ textarea.ans.journal{min-height:260px;font-family:var(--read);font-size:1.15rem;
 .rv-fix .btn{margin-top:6px}.rv-writing{border-top:1px solid #e6ebf5;padding:10px 0}
 @media print{.topbar,.tabs,.no-print,.sticky-actions,h1{display:none!important}body{background:#fff}.card{box-shadow:none;border:0}}
 .bp-banner{border:2px solid var(--gold,#ffbf2f);background:#fffaf0}.req-big.small{font-size:2rem;margin:0}.badge.gold{background:var(--gold,#ffbf2f);color:#3d2a00}
+/* v11: weekly summary print, bookshelf, writing hints, makeup planner */
+@media print{
+  body.print-week main > h1,body.print-week main > .tabs,body.print-week .topbar{display:none!important}
+  body.print-week main > div > div > *:not(#week-summary){display:none!important}
+  body.print-week #week-summary{display:block!important;border:0}
+  body.print-week #week-summary .row{display:flex!important}
+}
+.bookshelf{margin-top:10px;text-align:left}
+.bookshelf summary{cursor:pointer;font-weight:700}
+.bookshelf ul{list-style:none;padding:0;margin:8px 0;display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px}
+.bookshelf li a{display:block;padding:8px 10px;border:1px solid #d9dfeb;border-radius:10px;text-decoration:none;color:inherit;background:#fff}
+.bookshelf li a b{display:block}
+.bookshelf li a span{font-size:.85rem;color:var(--muted,#667)}
+.hints{margin-top:10px}
+.hints ul{margin:6px 0 0 18px;padding:0}
+.music-note{display:block;margin-top:4px;font-weight:700}
+.makeup-table td{padding:4px 8px}

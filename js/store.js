@@ -39,6 +39,7 @@
       readlog: {},    // lessonId -> {date, book, pages, summary, mins, ts, _u}  (v3 novel reading log)
       reqt: {},
       practice: {},   // v5: date -> block -> {right, total, _u}  Bonus practice results
+      makeupLog: {},  // v11: date -> {date, on, _u}  every make-up day add/remove, merged per date so two devices keep both
       reviews: {},    // v5: date -> Finish-my-day review {date, ts, items:{key:{...}}, done, celebrated, _u}       // v4: 'lessonId|date' -> {secs, _u}  seconds counted toward an assignment's required time
       streak: { last: '', n: 0, best: 0, _u: 0 },
       log: []         // small event log (last 200)
@@ -206,12 +207,21 @@
     var m = migrate(JSON.parse(JSON.stringify(local))), r = migrate(JSON.parse(JSON.stringify(remote)));
     m.profile = (r.profile && r.profile.name && !m.profile.name) ? r.profile : m.profile;
     m.settings = (r.settings._u || 0) > (m.settings._u || 0) ? r.settings : m.settings;
-    var KNOWN = ['v', 'device', 'profile', 'settings', 'progress', 'skills', 'ledger', 'payouts', 'attendance', 'time', 'writing', 'spelling', 'bible', 'memory', 'parentVerses', 'badges', 'readlog', 'reqt', 'reviews', 'streak', 'log', '_saved'];
+    var KNOWN = ['v', 'device', 'profile', 'settings', 'progress', 'skills', 'ledger', 'payouts', 'attendance', 'time', 'writing', 'spelling', 'bible', 'memory', 'parentVerses', 'badges', 'readlog', 'reqt', 'reviews', 'streak', 'log', '_saved', 'makeupLog', 'practice'];
     // v5 reviews: per date and per item, newest wins; a passed redo or parent clear is never lost
     m.reviews = root.Review && root.Review.merge ? root.Review.merge(local.reviews || {}, remote.reviews || {}) : mergeMap(local.reviews, remote.reviews);
     // v4 required-time counters: per assignment keep the larger count (time only grows), never lose one
     m.reqt = {}; [m.reqt, local.reqt || {}, remote.reqt || {}].forEach(function (x) { for (var q in x) { var c = m.reqt[q], e = x[q]; if (e && (!c || (+e.secs || 0) > (+c.secs || 0))) m.reqt[q] = e; } });
     ['progress', 'skills', 'payouts', 'writing', 'spelling', 'bible', 'memory', 'parentVerses', 'badges', 'readlog'].forEach(function (k) { m[k] = mergeMap(m[k], r[k]); });
+    // v11 make-up days: union per date, newest add/remove wins; days in either device's list survive unless removed later
+    m.makeupLog = mergeMap(m.makeupLog, r.makeupLog);
+    (function () {
+      var set = {}, ML = m.makeupLog || {}; [(local.settings || {}).makeup, (remote.settings || {}).makeup, m.settings.makeup].forEach(function (L) { (L || []).forEach(function (d) { set[d] = 1; }); });
+      for (var d in ML) { if (ML[d] && ML[d].on) set[d] = 1; else if (ML[d] && ML[d].on === false) delete set[d]; }
+      var L2 = Object.keys(set).sort(); if (JSON.stringify(L2) !== JSON.stringify((m.settings.makeup || []).slice().sort())) { m.settings = Object.assign({}, m.settings, { makeup: L2 }); }
+    })();
+    // v5 bonus practice: date -> block -> {right,total,_u}; newest per block wins (was handled as an unknown key before)
+    m.practice = {}; [local.practice || {}, remote.practice || {}].forEach(function (x) { for (var d in x) { var c = m.practice[d] || (m.practice[d] = {}); for (var b in x[d]) { var e = x[d][b]; if (!c[b] || ((e && e._u) || 0) > ((c[b] && c[b]._u) || 0)) c[b] = e; } } });
     // keys this version does not know (added by a newer version): keep them, never drop them
     Object.keys(r).forEach(function (k) {
       if (KNOWN.indexOf(k) >= 0) return;
@@ -266,6 +276,7 @@
       progress: Object.keys(S.state.progress).filter(function (k) { var d = S.state.progress[k].date; return d >= fromIso && d <= toIso; }).map(function (k) { return Object.assign({ id: k }, S.state.progress[k]); }),
       attendance: datesWithTime().filter(function (d) { return d >= fromIso && d <= toIso; }).map(function (d) { return { date: d, minutes: dayMinutes(d), counts: dayCounts(d), lessons: (S.state.attendance[d] || {}).lessons || 0 }; }),
       time: timeEntries(function (e) { return e.date >= fromIso && e.date <= toIso; }),
+      assessments: (root.Assess ? root.Assess.results(S.state, fromIso, toIso) : []),
       writing: S.state.writing, skills: S.state.skills }, null, 1);
   }
 
