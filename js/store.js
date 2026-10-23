@@ -40,6 +40,7 @@
       reqt: {},
       practice: {},   // v5: date -> block -> {right, total, _u}  Bonus practice results
       makeupLog: {},  // v11: date -> {date, on, _u}  every make-up day add/remove, merged per date so two devices keep both
+      payday: {},     // v12: payoutId -> {id, date, ts, amount, weeks:{weekMonday: usd}, toSave, by, dev, void, _u}  (union by id across devices)
       reviews: {},    // v5: date -> Finish-my-day review {date, ts, items:{key:{...}}, done, celebrated, _u}       // v4: 'lessonId|date' -> {secs, _u}  seconds counted toward an assignment's required time
       streak: { last: '', n: 0, best: 0, _u: 0 },
       log: []         // small event log (last 200)
@@ -56,7 +57,7 @@
 
   // ---------- persistence ----------
   function load(storage) {
-    try { var raw = (storage || root.localStorage).getItem(KEY); if (raw) S.state = migrate(JSON.parse(raw)); } catch (e) { /* keep blank */ }
+    try { var raw = (storage || S.storage || root.localStorage).getItem(KEY); if (raw) S.state = migrate(JSON.parse(raw)); } catch (e) { /* keep blank */ }
     return S.state;
   }
   // Only ADDS missing fields. Never removes or renames anything (unknown keys from newer versions are kept as-is).
@@ -73,7 +74,7 @@
   var saveTimer = null;
   function save(storage) {
     S.state._saved = now();
-    try { (storage || root.localStorage).setItem(KEY, JSON.stringify(S.state)); } catch (e) { S.saveError = e; }
+    try { (storage || S.storage || root.localStorage).setItem(KEY, JSON.stringify(S.state)); } catch (e) { S.saveError = e; }
     S.listeners.forEach(function (f) { try { f(S.state); } catch (e) { } });
   }
   function onChange(f) { S.listeners.push(f); }
@@ -97,11 +98,48 @@
     var usd = Math.min(st.weeklyCapUSD, Math.floor(raw * 100) / 100);
     return { stars: weekStars(weekMonday), raw: Math.floor(raw * 100) / 100, usd: usd, capped: raw > st.weeklyCapUSD };
   }
-  function totalOwed() {
+  function totalOwed() { return unpaid(); }
+  function totalOwedV11() {
     var owed = 0, st = S.state;
     var weeks = {}; for (var k in st.ledger) weeks[st.ledger[k].week] = 1;
     Object.keys(weeks).forEach(function (w) { var paid = st.payouts[w] && st.payouts[w].paidAt; if (!paid) owed += weekMoney(w).usd; });
     return Math.round(owed * 100) / 100;
+  }
+  // ---------- v12 payday: one payout covers every week with money still unpaid ----------
+  // Each week's money is capped at the weekly max. Unpaid for a week = capped money - what payouts already paid for it,
+  // so stars earned later in an already-paid week (or on another device during a payout) are never lost or paid twice.
+  var PAY_FROM = '2026-10-12'; // Monday of the week Ava started (Oct 13 2026); earlier ledger rows were setup/testing
+  function r2(n) { return Math.round(n * 100) / 100; }
+  function payFrom() { return S.state.settings.payFrom || PAY_FROM; }
+  function paidByWeek() {
+    var o = {}, P = S.state.payday || {}, L = S.state.payouts || {}, w;
+    for (var id in P) { var p = P[id]; if (!p || p.void) continue; for (w in (p.weeks || {})) o[w] = r2((o[w] || 0) + (+p.weeks[w] || 0)); }
+    for (w in L) if (L[w] && L[w].paidAt && !L[w].payId) o[w] = r2((o[w] || 0) + (+L[w].usd || 0)); // paid with the v11 per-week button
+    return o;
+  }
+  function unpaidWeeks() {
+    var weeks = {}, from = payFrom(), pb = paidByWeek(), L = S.state.ledger; for (var k in L) if (L[k].week >= from) weeks[L[k].week] = 1;
+    return Object.keys(weeks).sort().map(function (w) { var m = weekMoney(w), paid = pb[w] || 0; return { week: w, stars: m.stars, earned: m.usd, capped: m.capped, paid: paid, due: Math.max(0, r2(m.usd - paid)) }; });
+  }
+  function unpaid() { var t = 0; unpaidWeeks().forEach(function (x) { t += x.due; }); return r2(t); }
+  function payList() { var P = S.state.payday || {}; return Object.keys(P).map(function (k) { return P[k]; }).filter(function (p) { return p && !p.void; }).sort(function (a, b) { return (b.ts || 0) - (a.ts || 0); }); }
+  function savedTotal() { var t = 0; payList().forEach(function (p) { t += +p.toSave || 0; }); return r2(t); }
+  // The id is the next number in the payout chain (pay-1, pay-2, ...). Two devices that both press "Mark paid" from the
+  // same starting point make the SAME id, so after a sync there is one payout, never two.
+  function nextPayId() { var n = 0, P = S.state.payday || {}; for (var k in P) { var m = /^pay-(\d+)$/.exec(k); if (m && +m[1] > n) n = +m[1]; } return 'pay-' + (n + 1); }
+  function payNow(by, toSave, todayIso) {
+    var rows = unpaidWeeks().filter(function (x) { return x.due > 0; }); if (!rows.length) return null;
+    var P = S.state.payday || (S.state.payday = {}), id = nextPayId(), t = now(), weeks = {}, amt = 0;
+    rows.forEach(function (x) { weeks[x.week] = x.due; amt += x.due; }); amt = r2(amt);
+    var rec = P[id] = { id: id, date: todayIso || Cal.iso(new Date()), ts: t, amount: amt, weeks: weeks, toSave: Math.max(0, Math.min(amt, r2(+toSave || 0))), by: by || 'parent', dev: S.state.device, _u: t };
+    // also mark the weeks paid in the v11 per-week map, so a not-yet-updated device shows them as paid too
+    rows.forEach(function (x) { S.state.payouts[x.week] = { week: x.week, usd: r2(x.paid + x.due), stars: x.stars, paidAt: t, payId: id, _u: t }; });
+    return rec;
+  }
+  function undoPay(id) {
+    var p = (S.state.payday || {})[id]; if (!p || p.void) return false; var t = now(); p.void = true; p._u = Math.max(t, (p._u || 0) + 1);
+    for (var w in S.state.payouts) { var x = S.state.payouts[w]; if (x && x.payId === id) { x.paidAt = 0; x._u = Math.max(t, (x._u || 0) + 1); } }
+    return true;
   }
   function markPaid(weekMonday) {
     var m = weekMoney(weekMonday);
@@ -207,7 +245,7 @@
     var m = migrate(JSON.parse(JSON.stringify(local))), r = migrate(JSON.parse(JSON.stringify(remote)));
     m.profile = (r.profile && r.profile.name && !m.profile.name) ? r.profile : m.profile;
     m.settings = (r.settings._u || 0) > (m.settings._u || 0) ? r.settings : m.settings;
-    var KNOWN = ['v', 'device', 'profile', 'settings', 'progress', 'skills', 'ledger', 'payouts', 'attendance', 'time', 'writing', 'spelling', 'bible', 'memory', 'parentVerses', 'badges', 'readlog', 'reqt', 'reviews', 'streak', 'log', '_saved', 'makeupLog', 'practice'];
+    var KNOWN = ['v', 'device', 'profile', 'settings', 'progress', 'skills', 'ledger', 'payouts', 'attendance', 'time', 'writing', 'spelling', 'bible', 'memory', 'parentVerses', 'badges', 'readlog', 'reqt', 'reviews', 'streak', 'log', '_saved', 'makeupLog', 'practice', 'payday'];
     // v5 reviews: per date and per item, newest wins; a passed redo or parent clear is never lost
     m.reviews = root.Review && root.Review.merge ? root.Review.merge(local.reviews || {}, remote.reviews || {}) : mergeMap(local.reviews, remote.reviews);
     // v4 required-time counters: per assignment keep the larger count (time only grows), never lose one
@@ -215,6 +253,8 @@
     ['progress', 'skills', 'payouts', 'writing', 'spelling', 'bible', 'memory', 'parentVerses', 'badges', 'readlog'].forEach(function (k) { m[k] = mergeMap(m[k], r[k]); });
     // v11 make-up days: union per date, newest add/remove wins; days in either device's list survive unless removed later
     m.makeupLog = mergeMap(m.makeupLog, r.makeupLog);
+    // v12 payday: union by payout id; the same id (both devices paid from the same point) keeps the newest copy
+    m.payday = mergeMap(local.payday, remote.payday);
     (function () {
       var set = {}, ML = m.makeupLog || {}; [(local.settings || {}).makeup, (remote.settings || {}).makeup, m.settings.makeup].forEach(function (L) { (L || []).forEach(function (d) { set[d] = 1; }); });
       for (var d in ML) { if (ML[d] && ML[d].on) set[d] = 1; else if (ML[d] && ML[d].on === false) delete set[d]; }
@@ -287,7 +327,7 @@
 
   var api = {
     S: S, blank: blank, load: load, save: save, onChange: onChange, now: now, mondayOf: mondayOf,
-    addStars: addStars, weekStars: weekStars, weekMoney: weekMoney, totalOwed: totalOwed, markPaid: markPaid, RULES: RULES,
+    addStars: addStars, weekStars: weekStars, weekMoney: weekMoney, totalOwed: totalOwed, markPaid: markPaid, RULES: RULES, unpaid: unpaid, unpaidWeeks: unpaidWeeks, paidByWeek: paidByWeek, payNow: payNow, undoPay: undoPay, payList: payList, savedTotal: savedTotal, nextPayId: nextPayId, payFrom: payFrom, PAY_FROM: PAY_FROM,
     recordSkill: recordSkill, weakSkills: weakSkills, markAttendance: markAttendance, daysCounted: daysCounted, totalHours: totalHours,
     newId: newId, logTime: logTime, addTime: addTime, removeTime: removeTime, timeEntries: timeEntries, timeSecs: timeSecs, dayMinutes: dayMinutes, dayCounts: dayCounts, threshold: threshold,
     datesWithTime: datesWithTime, totalMinutes: totalMinutes, minutesBySubject: minutesBySubject, blockSecs: blockSecs, DEFAULT_RATE: DEFAULT_RATE, DEFAULT_CAP: DEFAULT_CAP,

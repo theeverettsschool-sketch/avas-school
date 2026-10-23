@@ -1,0 +1,28 @@
+{
+ "name": "Ava's School \u2013 Parent",
+ "short_name": "Ava Parent",
+ "id": "./",
+ "start_url": "./",
+ "scope": "./",
+ "display": "standalone",
+ "background_color": "#1b2a4e",
+ "theme_color": "#1b2a4e",
+ "icons": [
+  {
+   "src": "icons/icon-192.png",
+   "sizes": "192x192",
+   "type": "image/png"
+  },
+  {
+   "src": "icons/icon-512.png",
+   "sizes": "512x512",
+   "type": "image/png",
+   "purpose": "any maskable"
+  },
+  {
+   "src": "icons/icon-180.png",
+   "sizes": "180x180",
+   "type": "image/png"
+  }
+ ]
+}

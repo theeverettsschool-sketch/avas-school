@@ -42,3 +42,6 @@ New lessons arrive as replacement files in `js/content/` (plus `js/content/plan.
 
 ## 7. Georgia notes
 Home study: O.C.G.A. § 20-2-690 — 180 days, 4.5 hrs/day, Declaration of Intent, annual progress report (Parent → Report). The Fulton calendar from Oct 13 gives 135 school days; Parent → Overview shows the gap and lets you add make-up days.
+
+## Parent app (v12)
+Open https://theeverettsschool-sketch.github.io/avas-school/parent/ in Safari on your iPhone, sign in with the same family email and password used for sync, then Share → Add to Home Screen.

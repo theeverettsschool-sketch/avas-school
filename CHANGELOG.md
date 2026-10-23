@@ -1,3 +1,11 @@
+# Ava's School changelog
+
+# v12 (Oct 23 2026)
+- Payday: unpaid balance = money earned since the last payout (each week capped at the weekly max), per-week breakdown, one "Mark paid $X" button (Parent → Stars & pay). Payouts live in a new `payday` map (union by id across devices; same-point payouts collapse to one). Earned history is kept. First payout covers every week since Oct 12 2026 (Ava started Oct 13).
+- Kid star bank: "Waiting for payday: $X", paid history, optional savings goal.
+- New parent app at /parent/ (own manifest, icons, service worker scoped to /parent/): today, week, written work with flags, missed answers, scores, payday, payout history, adjust stars, make-up plan, weekly summary. Signs in with the family Firebase account; uses the same Store.merge/Sync code.
+- sw ava-school-v12.
+
 # Ava's School v5 (Phase 3)
 
 ## Finish my day + corrections + practice rounds

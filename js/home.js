@@ -193,7 +193,8 @@
     var st = S(), today = UI.today(), wk = Store.mondayOf(today), m = Store.weekMoney(wk), cap = st.settings.weeklyCapUSD, rate = st.settings.starsPerDollar, hours = Store.totalHours(), lvl = Player.level(hours);
     var entries = Object.keys(st.ledger).map(function (k) { return st.ledger[k]; }).filter(function (e) { return e.week === wk; }).sort(function (a, b) { return b.ts - a.ts; }).slice(0, 25);
     var main = h('main', { class: 'wrap' },
-      h('div', { class: 'sky' }, h('h1', null, 'Star bank ⭐'), h('div', { class: 'bank' }, h('div', null, h('b', null, m.stars), h('div', { class: 'sub' }, 'stars this week')), h('div', null, h('b', null, UI.money(m.usd)), h('div', { class: 'sub' }, 'worth')), h('div', null, h('b', null, UI.money(Store.totalOwed())), h('div', { class: 'sub' }, 'waiting to be paid'))), h('div', { class: 'meter-bar', style: { marginTop: '12px' } }, h('i', { style: { width: Math.min(100, 100 * m.usd / cap) + '%' } })), h('p', { class: 'sub small' }, rate + ' stars = $1. You can earn up to ' + UI.money(cap) + ' each week. ' + (m.capped ? 'You hit the max this week!' : 'Keep going!'))),
+      h('div', { class: 'sky' }, h('h1', null, 'Star bank ⭐'), h('div', { class: 'bank' }, h('div', null, h('b', null, m.stars), h('div', { class: 'sub' }, 'stars this week')), h('div', null, h('b', null, UI.money(m.usd)), h('div', { class: 'sub' }, 'worth')), h('div', null, h('b', null, UI.money(Store.unpaid())), h('div', { class: 'sub' }, 'Waiting for payday'))), h('div', { class: 'meter-bar', style: { marginTop: '12px' } }, h('i', { style: { width: Math.min(100, 100 * m.usd / cap) + '%' } })), h('p', { class: 'sub small' }, rate + ' stars = $1. You can earn up to ' + UI.money(cap) + ' each week. ' + (m.capped ? 'You hit the max this week!' : 'Keep going!'))),
+      payday(st),
       h('div', { class: 'card level-card' }, h('div', { class: 'row' }, Pics.ring(lvl.pct / 100, String(lvl.n), 96, 'level'), h('div', { class: 'grow' }, h('h3', null, 'Level ' + lvl.n + ': ' + lvl.name), h('p', null, hours + ' hours of learning so far.'), lvl.next ? h('p', { class: 'muted' }, (Math.round((lvl.next - hours) * 10) / 10) + ' more hours to reach ' + lvl.nextName + '.') : h('p', null, 'You reached the top level!')))),
       h('div', { class: 'card' }, h('h3', null, 'How stars work'), h('ul', null,
         h('li', null, h('b', null, '2 stars'), ' for a right answer on the first try, ', h('b', null, '1 star'), ' on the second try'),
@@ -207,5 +208,14 @@
     UI.render(topbar(), main);
   };
 
+  // v12: what she is waiting for, the savings goal, and the payouts she already got
+  function payday(st) {
+    var owe = Store.unpaid(), list = Store.payList(), goal = st.settings.saveGoal, saved = Store.savedTotal();
+    return h('div', { class: 'card', id: 'kid-payday' }, h('h3', null, '💵 Waiting for payday: ' + UI.money(owe)),
+      h('p', { class: 'small muted' }, owe > 0 ? 'This is the money you earned since your last payday. A parent pays it, usually on Friday.' : 'You are all paid up. Keep earning stars!'),
+      goal && goal.amount ? h('div', null, h('p', null, '🎯 Saving for ', h('b', null, goal.name), ': ' + UI.money(saved) + ' of ' + UI.money(goal.amount)), h('div', { class: 'meter-bar light' }, h('i', { style: { width: Math.min(100, 100 * saved / goal.amount) + '%' } }))) : null,
+      h('h4', { style: { margin: '12px 0 4px' } }, 'Paid so far'),
+      list.length ? h('table', null, h('tbody', null, list.map(function (p) { return h('tr', null, h('td', null, Cal.pretty(p.date)), h('td', null, h('b', null, UI.money(p.amount))), h('td', { class: 'small muted' }, p.toSave ? UI.money(p.toSave) + ' saved' : '')); }))) : h('p', { class: 'small muted' }, 'No paydays yet.'));
+  }
   root.Home = Home;
 })(window);
