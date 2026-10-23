@@ -1,5 +1,10 @@
 # Ava's School changelog
 
+# v13 (Oct 23 2026)
+- Behavior tracker: `behavior` map (entry id -> {date, score 1-10, reasons, note, by, _u}); the day's score is the latest entry, default 8 (editable). Kid top bar shows a face + 5 half/full bars; tap for the parent's note and a 7-day trend (read-only). Kid Parent → Overview shows the score and history.
+- Parent app: Behavior tab (1-10 picker, reason chips, note, weekly average, history with remove, default setting). Money: behavior deductions ($ or stars, required reason, undo until paid out; `moneyAdj` map) that lower the unpaid balance (never below $0, extra carries over) and appear in payout history; optional weekly behavior bonus (+$X if the week's average >= Y, off by default).
+- sw ava-school-v13, parent cache ava-parent-v2.
+
 # v12 (Oct 23 2026)
 - Payday: unpaid balance = money earned since the last payout (each week capped at the weekly max), per-week breakdown, one "Mark paid $X" button (Parent → Stars & pay). Payouts live in a new `payday` map (union by id across devices; same-point payouts collapse to one). Earned history is kept. First payout covers every week since Oct 12 2026 (Ava started Oct 13).
 - Kid star bank: "Waiting for payday: $X", paid history, optional savings goal.

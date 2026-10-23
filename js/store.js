@@ -41,6 +41,8 @@
       practice: {},   // v5: date -> block -> {right, total, _u}  Bonus practice results
       makeupLog: {},  // v11: date -> {date, on, _u}  every make-up day add/remove, merged per date so two devices keep both
       payday: {},     // v12: payoutId -> {id, date, ts, amount, weeks:{weekMonday: usd}, toSave, by, dev, void, _u}  (union by id across devices)
+      behavior: {},   // v13: entryId -> {id, date, score 1-10, reasons:[Listening|Respect|Responsibility], note, by, dev, ts, removed, _u}
+      moneyAdj: {},   // v13: id -> {id, date, ts, usd, stars, reason, kind:'deduct', by, dev, void, _u}  behavior deductions (union by id)
       reviews: {},    // v5: date -> Finish-my-day review {date, ts, items:{key:{...}}, done, celebrated, _u}       // v4: 'lessonId|date' -> {secs, _u}  seconds counted toward an assignment's required time
       streak: { last: '', n: 0, best: 0, _u: 0 },
       log: []         // small event log (last 200)
@@ -121,17 +123,65 @@
     var weeks = {}, from = payFrom(), pb = paidByWeek(), L = S.state.ledger; for (var k in L) if (L[k].week >= from) weeks[L[k].week] = 1;
     return Object.keys(weeks).sort().map(function (w) { var m = weekMoney(w), paid = pb[w] || 0; return { week: w, stars: m.stars, earned: m.usd, capped: m.capped, paid: paid, due: Math.max(0, r2(m.usd - paid)) }; });
   }
-  function unpaid() { var t = 0; unpaidWeeks().forEach(function (x) { t += x.due; }); return r2(t); }
+  function weeksDue() { var t = 0; unpaidWeeks().forEach(function (x) { t += x.due; }); return r2(t); }
+  // ---------- v13 behavior ----------
+  var REASONS = ['Listening', 'Respect', 'Responsibility'];
+  function behDefault() { var d = +S.state.settings.behaviorDefault; return d >= 1 && d <= 10 ? Math.round(d) : 8; }
+  function behEntries(dateIso) { var B = S.state.behavior || {}, out = []; for (var k in B) { var e = B[k]; if (e && !e.removed && (!dateIso || e.date === dateIso)) out.push(e); } return out.sort(function (a, b) { return (a.ts || 0) - (b.ts || 0) || (a.id < b.id ? -1 : 1); }); }
+  function behLatest(dateIso) { var L = behEntries(dateIso); return L.length ? L[L.length - 1] : null; }
+  function behScore(dateIso) { var e = behLatest(dateIso); return e ? e.score : behDefault(); }
+  function addBehavior(dateIso, score, reasons, note, by) {
+    var t = now(), id = newId('b'), B = S.state.behavior || (S.state.behavior = {});
+    var e = B[id] = { id: id, date: dateIso, score: Math.max(1, Math.min(10, Math.round(+score) || behDefault())), reasons: (reasons || []).filter(function (r) { return REASONS.indexOf(r) >= 0; }), note: String(note || '').slice(0, 500), by: by || 'parent', dev: S.state.device, ts: t, _u: t };
+    return e;
+  }
+  function removeBehavior(id) { var e = (S.state.behavior || {})[id]; if (!e) return; e.removed = true; e._u = Math.max(now(), (e._u || 0) + 1); }
+  // average over the school days of a week (Mon-Fri on the calendar, up to `through`), missing days count as the default
+  function behWeekAvg(weekMonday, throughIso) {
+    var n = 0, t = 0; for (var i = 0; i < 7; i++) { var d = Cal.addDays(weekMonday, i); if (throughIso && d > throughIso) break; var has = !!behLatest(d); if (!has && !(Cal.isSchoolDay && Cal.isSchoolDay(d, S.state.settings))) continue; n++; t += behScore(d); }
+    return n ? Math.round(10 * t / n) / 10 : null;
+  }
+  // ---------- v13 deductions and weekly behavior bonus ----------
+  function deductions() { var A = S.state.moneyAdj || {}, out = []; for (var k in A) if (A[k] && !A[k].void && A[k].kind === 'deduct') out.push(A[k]); return out.sort(function (a, b) { return (a.ts || 0) - (b.ts || 0); }); }
+  function adjApplied() { var o = {}; payList().forEach(function (p) { for (var k in (p.adj || {})) o[k] = r2((o[k] || 0) + (+p.adj[k] || 0)); }); return o; }
+  function deductLeft(d, ap) { return Math.max(0, r2((+d.usd || 0) - ((ap || adjApplied())[d.id] || 0))); }
+  function addDeduction(usd, stars, reason, dateIso, by) {
+    var rate = +S.state.settings.starsPerDollar || DEFAULT_RATE, amt = stars ? r2(Math.abs(+stars) / rate) : r2(Math.abs(+usd || 0)); if (!amt || !String(reason || '').trim()) return null;
+    var t = now(), id = newId('d'), A = S.state.moneyAdj || (S.state.moneyAdj = {});
+    return (A[id] = { id: id, kind: 'deduct', date: dateIso || Cal.iso(new Date()), ts: t, usd: amt, stars: stars ? Math.abs(Math.round(+stars)) : 0, reason: String(reason).trim().slice(0, 200), by: by || 'parent', dev: S.state.device, _u: t });
+  }
+  // undo works until a payout has used the deduction (after that the money already changed hands)
+  function undoDeduction(id) { var d = (S.state.moneyAdj || {})[id]; if (!d || d.void || adjApplied()[id]) return false; d.void = true; d._u = Math.max(now(), (d._u || 0) + 1); return true; }
+  function bonusCfg() { var b = S.state.settings.behBonus || {}; return { on: !!b.on && +b.usd > 0, usd: r2(+b.usd || 0), min: +b.min || 9 }; }
+  // a week qualifies once its Friday has come (today >= Friday) and its school-day average reaches the setting
+  function bonusWeeks(todayIso) {
+    var c = bonusCfg(), out = []; if (!c.on) return out; todayIso = todayIso || Cal.iso(new Date());
+    var paid = {}; payList().forEach(function (p) { for (var w in (p.bonus || {})) paid[w] = r2((paid[w] || 0) + (+p.bonus[w] || 0)); });
+    for (var w = mondayOf(payFrom() < '2000' ? todayIso : payFrom()); Cal.addDays(w, 4) <= todayIso; w = Cal.addDays(w, 7)) {
+      var avg = behWeekAvg(w, Cal.addDays(w, 6) < todayIso ? null : todayIso); if (avg !== null && avg >= c.min) out.push({ week: w, avg: avg, usd: c.usd, paid: paid[w] || 0, due: Math.max(0, r2(c.usd - (paid[w] || 0))) });
+    }
+    return out;
+  }
+  function payBreakdown(todayIso) {
+    var due = weeksDue(), bon = 0, bw = bonusWeeks(todayIso), ap = adjApplied(), ded = 0, ds = deductions();
+    bw.forEach(function (x) { bon += x.due; }); ds.forEach(function (d) { ded += deductLeft(d, ap); });
+    bon = r2(bon); ded = r2(ded); var gross = r2(due + bon), apply = Math.min(ded, gross);
+    return { weeks: due, bonus: bon, bonusWeeks: bw, deductions: ded, deductList: ds, applied: r2(apply), carry: r2(ded - apply), net: Math.max(0, r2(gross - apply)) };
+  }
+  function unpaid(todayIso) { return payBreakdown(todayIso).net; }
   function payList() { var P = S.state.payday || {}; return Object.keys(P).map(function (k) { return P[k]; }).filter(function (p) { return p && !p.void; }).sort(function (a, b) { return (b.ts || 0) - (a.ts || 0); }); }
   function savedTotal() { var t = 0; payList().forEach(function (p) { t += +p.toSave || 0; }); return r2(t); }
   // The id is the next number in the payout chain (pay-1, pay-2, ...). Two devices that both press "Mark paid" from the
   // same starting point make the SAME id, so after a sync there is one payout, never two.
   function nextPayId() { var n = 0, P = S.state.payday || {}; for (var k in P) { var m = /^pay-(\d+)$/.exec(k); if (m && +m[1] > n) n = +m[1]; } return 'pay-' + (n + 1); }
   function payNow(by, toSave, todayIso) {
-    var rows = unpaidWeeks().filter(function (x) { return x.due > 0; }); if (!rows.length) return null;
-    var P = S.state.payday || (S.state.payday = {}), id = nextPayId(), t = now(), weeks = {}, amt = 0;
-    rows.forEach(function (x) { weeks[x.week] = x.due; amt += x.due; }); amt = r2(amt);
-    var rec = P[id] = { id: id, date: todayIso || Cal.iso(new Date()), ts: t, amount: amt, weeks: weeks, toSave: Math.max(0, Math.min(amt, r2(+toSave || 0))), by: by || 'parent', dev: S.state.device, _u: t };
+    var rows = unpaidWeeks().filter(function (x) { return x.due > 0; }), B = payBreakdown(todayIso), bw = B.bonusWeeks.filter(function (x) { return x.due > 0; });
+    if (!rows.length && !bw.length) return null;
+    var P = S.state.payday || (S.state.payday = {}), id = nextPayId(), t = now(), weeks = {}, bonus = {}, adj = {}, gross = 0;
+    rows.forEach(function (x) { weeks[x.week] = x.due; gross += x.due; }); bw.forEach(function (x) { bonus[x.week] = x.due; gross += x.due; }); gross = r2(gross);
+    var left = Math.min(B.deductions, gross), ap = adjApplied(); B.deductList.forEach(function (d) { var k = Math.min(left, deductLeft(d, ap)); if (k > 0) { adj[d.id] = r2(k); left = r2(left - k); } });
+    var ded = 0; for (var k in adj) ded += adj[k]; ded = r2(ded); var amt = Math.max(0, r2(gross - ded));
+    var rec = P[id] = { id: id, date: todayIso || Cal.iso(new Date()), ts: t, amount: amt, gross: gross, weeks: weeks, bonus: bonus, adj: adj, deducted: ded, toSave: Math.max(0, Math.min(amt, r2(+toSave || 0))), by: by || 'parent', dev: S.state.device, _u: t };
     // also mark the weeks paid in the v11 per-week map, so a not-yet-updated device shows them as paid too
     rows.forEach(function (x) { S.state.payouts[x.week] = { week: x.week, usd: r2(x.paid + x.due), stars: x.stars, paidAt: t, payId: id, _u: t }; });
     return rec;
@@ -245,7 +295,7 @@
     var m = migrate(JSON.parse(JSON.stringify(local))), r = migrate(JSON.parse(JSON.stringify(remote)));
     m.profile = (r.profile && r.profile.name && !m.profile.name) ? r.profile : m.profile;
     m.settings = (r.settings._u || 0) > (m.settings._u || 0) ? r.settings : m.settings;
-    var KNOWN = ['v', 'device', 'profile', 'settings', 'progress', 'skills', 'ledger', 'payouts', 'attendance', 'time', 'writing', 'spelling', 'bible', 'memory', 'parentVerses', 'badges', 'readlog', 'reqt', 'reviews', 'streak', 'log', '_saved', 'makeupLog', 'practice', 'payday'];
+    var KNOWN = ['v', 'device', 'profile', 'settings', 'progress', 'skills', 'ledger', 'payouts', 'attendance', 'time', 'writing', 'spelling', 'bible', 'memory', 'parentVerses', 'badges', 'readlog', 'reqt', 'reviews', 'streak', 'log', '_saved', 'makeupLog', 'practice', 'payday', 'behavior', 'moneyAdj'];
     // v5 reviews: per date and per item, newest wins; a passed redo or parent clear is never lost
     m.reviews = root.Review && root.Review.merge ? root.Review.merge(local.reviews || {}, remote.reviews || {}) : mergeMap(local.reviews, remote.reviews);
     // v4 required-time counters: per assignment keep the larger count (time only grows), never lose one
@@ -255,6 +305,9 @@
     m.makeupLog = mergeMap(m.makeupLog, r.makeupLog);
     // v12 payday: union by payout id; the same id (both devices paid from the same point) keeps the newest copy
     m.payday = mergeMap(local.payday, remote.payday);
+    // v13 behavior log + money deductions: union by entry id (two devices' entries are both kept), newest edit per id wins
+    m.behavior = mergeMap(local.behavior, remote.behavior);
+    m.moneyAdj = mergeMap(local.moneyAdj, remote.moneyAdj);
     (function () {
       var set = {}, ML = m.makeupLog || {}; [(local.settings || {}).makeup, (remote.settings || {}).makeup, m.settings.makeup].forEach(function (L) { (L || []).forEach(function (d) { set[d] = 1; }); });
       for (var d in ML) { if (ML[d] && ML[d].on) set[d] = 1; else if (ML[d] && ML[d].on === false) delete set[d]; }
@@ -327,7 +380,7 @@
 
   var api = {
     S: S, blank: blank, load: load, save: save, onChange: onChange, now: now, mondayOf: mondayOf,
-    addStars: addStars, weekStars: weekStars, weekMoney: weekMoney, totalOwed: totalOwed, markPaid: markPaid, RULES: RULES, unpaid: unpaid, unpaidWeeks: unpaidWeeks, paidByWeek: paidByWeek, payNow: payNow, undoPay: undoPay, payList: payList, savedTotal: savedTotal, nextPayId: nextPayId, payFrom: payFrom, PAY_FROM: PAY_FROM,
+    addStars: addStars, weekStars: weekStars, weekMoney: weekMoney, totalOwed: totalOwed, markPaid: markPaid, RULES: RULES, unpaid: unpaid, weeksDue: weeksDue, payBreakdown: payBreakdown, bonusWeeks: bonusWeeks, bonusCfg: bonusCfg, addDeduction: addDeduction, undoDeduction: undoDeduction, deductions: deductions, adjApplied: adjApplied, deductLeft: deductLeft, REASONS: REASONS, behDefault: behDefault, behEntries: behEntries, behLatest: behLatest, behScore: behScore, addBehavior: addBehavior, removeBehavior: removeBehavior, behWeekAvg: behWeekAvg, unpaidWeeks: unpaidWeeks, paidByWeek: paidByWeek, payNow: payNow, undoPay: undoPay, payList: payList, savedTotal: savedTotal, nextPayId: nextPayId, payFrom: payFrom, PAY_FROM: PAY_FROM,
     recordSkill: recordSkill, weakSkills: weakSkills, markAttendance: markAttendance, daysCounted: daysCounted, totalHours: totalHours,
     newId: newId, logTime: logTime, addTime: addTime, removeTime: removeTime, timeEntries: timeEntries, timeSecs: timeSecs, dayMinutes: dayMinutes, dayCounts: dayCounts, threshold: threshold,
     datesWithTime: datesWithTime, totalMinutes: totalMinutes, minutesBySubject: minutesBySubject, blockSecs: blockSecs, DEFAULT_RATE: DEFAULT_RATE, DEFAULT_CAP: DEFAULT_CAP,

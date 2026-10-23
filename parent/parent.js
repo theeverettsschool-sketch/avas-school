@@ -43,12 +43,12 @@
   }
 
   // ---------- screens ----------
-  var TABS = [['today', '🏠', 'Today'], ['week', '📅', 'Week'], ['work', '📝', 'Work'], ['money', '💵', 'Money'], ['plan', '🗓️', 'Plan']];
+  var TABS = [['today', '🏠', 'Today'], ['week', '📅', 'Week'], ['behavior', '😊', 'Behavior'], ['work', '📝', 'Work'], ['money', '💵', 'Money'], ['plan', '🗓️', 'Plan']];
   function render() {
     var app = document.getElementById('app'); app.innerHTML = '';
     if (!Sync.cfg) { app.appendChild(h('main', null, h('div', { class: 'card' }, 'Firebase settings are missing (config.js).'))); return; }
     if (!Sync.auth) return login(app);
-    var body = h('main'); var fn = { today: todayView, week: weekView, work: workView, money: moneyView, plan: planView }[A.tab] || todayView;
+    var body = h('main'); var fn = { today: todayView, week: weekView, behavior: behaviorView, work: workView, money: moneyView, plan: planView }[A.tab] || todayView;
     try { fn(body); } catch (e) { body.appendChild(h('div', { class: 'card' }, h('h2', null, 'This screen hit a problem'), h('p', { class: 'small muted' }, String(e && e.message || e)))); }
     app.appendChild(h('header', null, h('h1', null, ((S().profile && S().profile.name) || 'Ava') + "'s School · Parent"), h('button', { class: 'sync', onclick: function () { sync().then(render); } }, syncLabel())));
     app.appendChild(body);
@@ -80,7 +80,8 @@
       h('div', { class: 'stat' }, h('span', { class: 'small muted' }, 'Assignments'), h('b', null, I.done.length + ' / ' + I.lessons.length), h('span', { class: 'small muted' }, 'done today')),
       h('div', { class: 'stat' }, h('span', { class: 'small muted' }, 'Days counted'), h('b', null, counted + ' / 180'), bar(100 * counted / 180, true)),
       h('div', { class: 'stat' }, h('span', { class: 'small muted' }, 'Stars this week'), h('b', null, Store.weekStars(Store.mondayOf(d))), h('span', { class: 'small muted' }, money(Store.weekMoney(Store.mondayOf(d)).usd))),
-      h('div', { class: 'stat', onclick: function () { A.tab = 'money'; render(); } }, h('span', { class: 'small muted' }, 'Waiting for payday'), h('b', null, money(Store.unpaid())), h('span', { class: 'small muted' }, 'unpaid balance ›'))));
+      h('div', { class: 'stat', onclick: function () { A.tab = 'money'; render(); } }, h('span', { class: 'small muted' }, 'Waiting for payday'), h('b', null, money(Store.unpaid(today()))), h('span', { class: 'small muted' }, 'unpaid balance ›'))));
+    var bw = h('div', { class: 'card', id: 'today-beh', onclick: function () { A.tab = 'behavior'; render(); } }, h('h2', null, 'Behavior today')), bi = h('div'); bi.innerHTML = Beh.widget(Store.behScore(d), { size: 34, bar: 20, num: true }) + ' <span class="small muted">' + (Store.behLatest(d) ? '' : 'default · tap to score') + '</span>'; bw.appendChild(bi); b.appendChild(bw);
     var c2 = card(b, "Today's assignments");
     c2.appendChild(I.lessons.length ? h('table', null, h('tbody', null, I.lessons.map(function (l) { var p = st.progress[l.id]; return h('tr', null, h('td', null, (l.icon || '') + ' ' + (l.title || l.id)), h('td', { class: 'r' }, p && p.done ? h('span', { class: 'tag ok' }, p.total ? Math.round(100 * (p.right || 0) / p.total) + '%' : 'done') : h('span', { class: 'tag' }, 'not yet'))); }))) : h('p', { class: 'muted small' }, 'No school today.'));
     var subs = Store.minutesBySubject(d, d), ks = Object.keys(subs).filter(function (k) { return subs[k] > 0; });
@@ -147,29 +148,48 @@
   }
 
   function moneyView(b) {
-    var st = S(), owe = Store.unpaid(), rows = Store.unpaidWeeks().filter(function (x) { return x.due > 0 || x.paid > 0; }).reverse(), goal = st.settings.saveGoal, d = today();
+    var st = S(), owe = Store.unpaid(today()), rows = Store.unpaidWeeks().filter(function (x) { return x.due > 0 || x.paid > 0; }).reverse(), goal = st.settings.saveGoal, d = today();
+    var B = Store.payBreakdown(d);
     var c = card(b, 'Waiting for payday'); c.id = 'payday';
     c.appendChild(h('div', { class: 'big', id: 'unpaid' }, money(owe)));
+    if (B.bonus || B.deductions) c.appendChild(h('table', { id: 'pay-math', style: { margin: '6px 0' } }, h('tbody', null, h('tr', null, h('td', null, 'Weeks earned'), h('td', { class: 'r' }, money(B.weeks))), B.bonus ? h('tr', null, h('td', null, '🌟 Behavior bonus (' + B.bonusWeeks.filter(function (x) { return x.due > 0; }).length + ' wk)'), h('td', { class: 'r' }, '+' + money(B.bonus))) : null, B.deductions ? h('tr', null, h('td', null, 'Behavior deductions'), h('td', { class: 'r' }, '−' + money(B.applied))) : null, h('tr', null, h('td', null, h('b', null, 'To pay')), h('td', { class: 'r' }, h('b', null, money(owe)))))));
+    if (B.carry) c.appendChild(h('p', { class: 'small muted' }, money(B.carry) + ' of deductions is more than what she has earned; it carries to the next payday (the balance never goes below $0).'));
     c.appendChild(h('p', { class: 'small muted' }, 'Unpaid since the last payout. ' + st.settings.starsPerDollar + ' stars = $1, up to ' + money(st.settings.weeklyCapUSD) + ' a week.'));
     if (Cal.parse(d).getDay() === 5 && owe > 0) c.appendChild(h('div', { class: 'okbox' }, '📅 It is Friday – payday!'));
     c.appendChild(rows.length ? h('table', null, h('thead', null, h('tr', null, h('th', null, 'Week of'), h('th', { class: 'r' }, 'Stars'), h('th', { class: 'r' }, 'Earned'), h('th', { class: 'r' }, 'Unpaid'))), h('tbody', null, rows.map(function (x) { return h('tr', null, h('td', null, Cal.short(x.week)), h('td', { class: 'r' }, x.stars), h('td', { class: 'r' }, money(x.earned) + (x.capped ? '*' : '')), h('td', { class: 'r' }, h('b', null, money(x.due)), x.paid ? h('div', { class: 'small muted' }, money(x.paid) + ' paid') : null)); }))) : h('p', { class: 'small muted' }, 'No stars earned yet.'));
     if (rows.some(function (x) { return x.capped; })) c.appendChild(h('p', { class: 'small muted' }, '* reached the weekly max'));
     var sv = h('input', { type: 'number', min: 0, step: '0.25', inputmode: 'decimal', value: '', placeholder: '0.00', id: 'tosave' });
     if (goal && goal.amount) c.appendChild(h('div', null, h('label', { for: 'tosave' }, 'Part to savings goal "' + goal.name + '" ($)'), sv));
-    if (owe > 0) c.appendChild(h('button', { class: 'btn gold wide', id: 'markpaid', style: { marginTop: '10px' }, onclick: function () {
+    if (B.weeks + B.bonus > 0) c.appendChild(h('button', { class: 'btn gold wide', id: 'markpaid', style: { marginTop: '10px' }, onclick: function () {
       var amt = owe, s = Math.max(0, Math.min(amt, +sv.value || 0));
       confirmBox('Mark paid ' + money(amt) + '?', 'Covers every unpaid week above' + (s ? ', with ' + money(s) + ' to savings' : '') + '. Her earned history is kept.', 'Yes, I paid her', function () {
         change(function () { return Store.payNow('parent app', s, today()); }, function (r) { return r ? 'Paid ' + money(r.amount) + ' ✓' : 'Nothing was unpaid after the latest sync.'; });
       });
     } }, 'Mark paid ' + money(owe)));
     var list = Store.payList(), c2 = card(b, 'Payout history');
-    c2.appendChild(list.length ? h('table', null, h('tbody', null, list.map(function (p) { return h('tr', null, h('td', null, Cal.pretty(p.date), h('div', { class: 'small muted' }, Object.keys(p.weeks || {}).length + ' week(s) · ' + (p.by || ''))), h('td', { class: 'r' }, h('b', null, money(p.amount)), p.toSave ? h('div', { class: 'small muted' }, money(p.toSave) + ' saved') : null)); }))) : h('p', { class: 'small muted' }, 'No payouts yet. The first one covers every week since ' + Cal.pretty(Store.payFrom()) + '.'));
+    c2.appendChild(list.length ? h('table', null, h('tbody', null, list.map(function (p) { return h('tr', null, h('td', null, Cal.pretty(p.date), h('div', { class: 'small muted' }, Object.keys(p.weeks || {}).length + ' week(s) · ' + (p.by || '')), p.deducted ? h('div', { class: 'small', style: { color: '#c2410c' } }, '−' + money(p.deducted) + ' behavior: ' + Object.keys(p.adj || {}).map(function (k) { var x = (S().moneyAdj || {})[k]; return x ? x.reason : ''; }).filter(Boolean).join('; ')) : null, p.bonus && Object.keys(p.bonus).length ? h('div', { class: 'small', style: { color: '#1f9d6b' } }, '🌟 +' + money(Object.keys(p.bonus).reduce(function (t, w) { return t + p.bonus[w]; }, 0)) + ' behavior bonus') : null), h('td', { class: 'r' }, h('b', null, money(p.amount)), p.toSave ? h('div', { class: 'small muted' }, money(p.toSave) + ' saved') : null)); }))) : h('p', { class: 'small muted' }, 'No payouts yet. The first one covers every week since ' + Cal.pretty(Store.payFrom()) + '.'));
     var c3 = card(b, 'Savings goal');
     if (goal && goal.amount) { var saved = Store.savedTotal(); c3.appendChild(h('p', null, goal.name + ': ' + money(saved) + ' of ' + money(goal.amount))); c3.appendChild(bar(100 * saved / goal.amount, true)); }
     var gn = h('input', { placeholder: 'e.g., new bike', value: goal ? goal.name : '' }), ga = h('input', { type: 'number', min: 0, inputmode: 'decimal', value: goal ? goal.amount : '' });
     c3.appendChild(h('details', null, h('summary', null, goal ? 'Change goal' : 'Set a goal'), h('label', null, 'Goal name'), gn, h('label', null, 'Amount ($)'), ga, h('button', { class: 'btn small', style: { marginTop: '8px' }, onclick: function () {
       change(function () { var a = Math.max(0, +ga.value || 0); S().settings.saveGoal = a && gn.value.trim() ? { name: gn.value.trim(), amount: a } : null; S().settings._u = Store.now(); }, 'Goal saved.');
     } }, 'Save goal')));
+    // v13 behavior deduction
+    var unit = { v: 'usd' }, dn = h('input', { type: 'number', min: 0, step: '0.25', inputmode: 'decimal', id: 'ded-n', placeholder: '1.00' }), dwhy = h('input', { id: 'ded-why', placeholder: 'Reason (required)' });
+    var ub = h('div', { class: 'seg', style: { margin: '0 0 8px' } }, [['usd', '$ dollars'], ['stars', '⭐ stars']].map(function (u) { return h('button', { 'aria-selected': u[0] === 'usd' ? 'true' : 'false', 'data-unit': u[0], onclick: function () { unit.v = u[0]; [].forEach.call(ub.children, function (x) { x.setAttribute('aria-selected', x.dataset.unit === unit.v ? 'true' : 'false'); }); dn.placeholder = unit.v === 'usd' ? '1.00' : '50'; } }, u[1]); }));
+    var cd = card(b, 'Behavior deduction'); cd.id = 'deduct';
+    cd.appendChild(h('p', { class: 'small muted' }, 'Takes money off the unpaid balance (never below $0). It shows in payout history. You can undo it until it is paid out.'));
+    cd.appendChild(ub); cd.appendChild(dn); cd.appendChild(h('div', { style: { marginTop: '8px' } }, dwhy));
+    cd.appendChild(h('button', { class: 'btn wide', id: 'ded-go', style: { marginTop: '8px', background: '#c2410c' }, onclick: function () { var v = Math.abs(+dn.value || 0), w = dwhy.value.trim(); if (!v || !w) return toast('Enter an amount and a reason.'); change(function () { return Store.addDeduction(unit.v === 'usd' ? v : 0, unit.v === 'stars' ? v : 0, w, today(), 'parent app'); }, function (r) { return r ? '−' + money(r.usd) + ' deducted.' : 'Not saved.'; }); } }, 'Deduct'));
+    var ap = Store.adjApplied(), dl = Object.keys(st.moneyAdj || {}).map(function (k) { return st.moneyAdj[k]; }).filter(function (x) { return x && x.kind === 'deduct'; }).sort(function (a, b) { return b.ts - a.ts; }).slice(0, 15);
+    if (dl.length) cd.appendChild(h('table', { style: { marginTop: '8px' }, id: 'ded-list' }, h('tbody', null, dl.map(function (x) { var paid = ap[x.id] || 0, state = x.void ? 'undone' : paid >= x.usd ? 'paid out' : paid ? 'part paid out' : 'pending'; return h('tr', null, h('td', null, Cal.short(x.date)), h('td', { class: 'small' }, x.reason, x.stars ? h('div', { class: 'muted' }, x.stars + ' stars') : null), h('td', { class: 'r' }, (x.void ? h('s', null, '−' + money(x.usd)) : '−' + money(x.usd)), h('div', null, h('span', { class: 'tag ' + (state === 'pending' ? 'warn' : state === 'undone' ? '' : 'ok') }, state))), h('td', { class: 'r' }, !x.void && !paid ? h('button', { class: 'btn small ghost', onclick: function () { change(function () { return Store.undoDeduction(x.id); }, 'Deduction undone.'); } }, 'Undo') : null)); }))));
+    var bc = Store.bonusCfg(), bOn = h('input', { type: 'checkbox', id: 'bon-on', style: { width: 'auto' } }); bOn.checked = bc.on;
+    var bUsd = h('input', { type: 'number', min: 0, step: '0.5', id: 'bon-usd', value: (st.settings.behBonus && st.settings.behBonus.usd) || 2 }), bMin = h('input', { type: 'number', min: 1, max: 10, step: '0.5', id: 'bon-min', value: (st.settings.behBonus && st.settings.behBonus.min) || 9 });
+    var cb = card(b, 'Weekly behavior bonus');
+    cb.appendChild(h('label', { style: { display: 'flex', gap: '8px', alignItems: 'center' } }, bOn, 'On (off by default)'));
+    cb.appendChild(h('div', { class: 'row' }, h('div', null, h('label', null, '+$ per week'), bUsd), h('div', null, h('label', null, 'if average ≥'), bMin)));
+    cb.appendChild(h('p', { class: 'small muted' }, 'Added once the week\'s Friday arrives, if her school-day average reaches the target. Paid with the next payday.'));
+    cb.appendChild(h('button', { class: 'btn small', id: 'bon-save', onclick: function () { change(function () { S().settings.behBonus = { on: bOn.checked, usd: Math.max(0, +bUsd.value || 0), min: Math.max(1, Math.min(10, +bMin.value || 9)) }; S().settings._u = Store.now(); }, 'Bonus setting saved.'); } }, 'Save'));
     var n = h('input', { type: 'number', inputmode: 'numeric', id: 'adj-n', placeholder: '+10 or -5' }), why = h('input', { id: 'adj-why', placeholder: 'Reason (e.g., helped with chores)' });
     var c4 = card(b, 'Adjust stars');
     c4.appendChild(h('p', { class: 'small muted' }, 'Add or take away stars with a reason. It goes into this week and her history.'));
@@ -178,6 +198,31 @@
     c4.appendChild(h('button', { class: 'btn wide', id: 'adj-go', style: { marginTop: '8px' }, onclick: function () { var k = Math.round(+n.value || 0), w = why.value.trim(); if (!k || !w) return toast('Enter stars and a reason.'); change(function () { return Store.addStars(k, 'Parent: ' + w, '', today(), today()); }, (k > 0 ? '+' : '') + k + ' stars saved.'); } }, 'Save adjustment'));
     var adj = Object.keys(st.ledger).map(function (k) { return st.ledger[k]; }).filter(function (e) { return /^Parent:/.test(e.why || ''); }).sort(function (a, b) { return b.ts - a.ts; }).slice(0, 10);
     if (adj.length) c4.appendChild(h('table', { style: { marginTop: '8px' } }, h('tbody', null, adj.map(function (e) { return h('tr', null, h('td', null, Cal.short(e.date)), h('td', null, e.why.replace(/^Parent: /, '')), h('td', { class: 'r' }, (e.stars > 0 ? '+' : '') + e.stars)); }))));
+  }
+
+  function behaviorView(b) {
+    var st = S(), d = A.behDate || today(), sc = Store.behScore(d), cur = Store.behLatest(d), pick = { score: cur ? cur.score : sc, reasons: {} };
+    var c = card(b, 'Behavior'); c.id = 'beh-editor';
+    var dIn = h('input', { type: 'date', value: d, max: today(), id: 'beh-date', onchange: function () { A.behDate = dIn.value || today(); render(); } });
+    c.appendChild(h('label', { for: 'beh-date' }, 'Day')); c.appendChild(dIn);
+    var view = h('div', { style: { margin: '12px 0', textAlign: 'center' }, id: 'beh-view' }); c.appendChild(view);
+    function paint() { view.innerHTML = Beh.face(pick.score, 64) + '<div style="margin-top:6px">' + Beh.bars(pick.score, 26) + '</div><div><b>' + pick.score + '/10 · ' + Beh.band(pick.score).name + '</b></div>' + (cur ? '' : '<div class="small muted">No score saved for this day yet (starts at ' + Store.behDefault() + ')</div>');
+      [].forEach.call(grid.children, function (x) { x.setAttribute('aria-pressed', +x.dataset.v === pick.score ? 'true' : 'false'); x.style.outline = +x.dataset.v === pick.score ? '3px solid #1b2a4e' : 'none'; }); }
+    var grid = h('div', { class: 'beh-grid', style: { display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: '6px' } }, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(function (v) { return h('button', { class: 'btn small', 'data-v': v, style: { background: Beh.band(v).color, color: v >= 5 && v <= 8 ? '#1b2a4e' : '#fff' }, onclick: function () { pick.score = v; paint(); } }, String(v)); }));
+    c.appendChild(h('label', null, 'Score (1–10)')); c.appendChild(grid);
+    c.appendChild(h('label', null, 'Reasons (optional)'));
+    c.appendChild(h('div', { class: 'row', style: { flexWrap: 'wrap' } }, Store.REASONS.map(function (r) { var bt = h('button', { class: 'btn small ghost chip', 'aria-pressed': 'false', 'data-r': r, onclick: function () { pick.reasons[r] = !pick.reasons[r]; bt.setAttribute('aria-pressed', pick.reasons[r] ? 'true' : 'false'); bt.className = 'btn small chip' + (pick.reasons[r] ? '' : ' ghost'); } }, r); return bt; })));
+    var note = h('textarea', { rows: 2, id: 'beh-note', placeholder: 'Note for Ava (she will see it)' }); c.appendChild(h('label', { for: 'beh-note' }, 'Note (optional)')); c.appendChild(note);
+    c.appendChild(h('button', { class: 'btn gold wide', id: 'beh-save', style: { marginTop: '10px' }, onclick: function () { var rs = Store.REASONS.filter(function (r) { return pick.reasons[r]; }); change(function () { return Store.addBehavior(d, pick.score, rs, note.value.trim(), 'parent app'); }, 'Saved ' + pick.score + '/10 for ' + Cal.short(d) + '.'); } }, 'Save score'));
+    paint();
+    var mon = Store.mondayOf(today()), a1 = Store.behWeekAvg(mon, today()), a0 = Store.behWeekAvg(Cal.addDays(mon, -7));
+    var c2 = card(b, 'Weekly average'); c2.appendChild(h('div', { class: 'grid' }, h('div', null, h('span', { class: 'small muted' }, 'This week'), h('b', { style: { display: 'block', fontSize: '1.4rem' }, id: 'beh-avg' }, a1 === null ? '–' : a1)), h('div', null, h('span', { class: 'small muted' }, 'Last week'), h('b', { style: { display: 'block', fontSize: '1.4rem' } }, a0 === null ? '–' : a0))));
+    var tr = h('div', { style: { display: 'flex', gap: '4px', marginTop: '10px' } }, Beh.trend(Store, today(), Cal).map(function (x) { var e = h('div', { style: { flex: '1', textAlign: 'center', opacity: x.set ? 1 : 0.5 } }); e.innerHTML = Beh.face(x.score, 30) + '<div class="small">' + Cal.parse(x.date).toLocaleDateString([], { weekday: 'narrow' }) + '</div>'; return e; })); c2.appendChild(tr);
+    c2.appendChild(h('p', { class: 'small muted' }, 'School days without a score count as the default (' + Store.behDefault() + ').'));
+    var hist = Store.behEntries().reverse().slice(0, 30), c3 = card(b, 'History');
+    c3.appendChild(hist.length ? h('table', null, h('tbody', null, hist.map(function (x) { var latest = Store.behLatest(x.date) === x; return h('tr', null, h('td', null, Cal.short(x.date), latest ? null : h('div', { class: 'small muted' }, 'replaced')), h('td', null, h('b', null, x.score)), h('td', { class: 'small' }, (x.reasons || []).join(', '), x.note ? h('div', { class: 'muted' }, x.note) : null), h('td', { class: 'r' }, h('button', { class: 'btn small ghost', onclick: function () { confirmBox('Remove this score?', x.score + '/10 on ' + Cal.pretty(x.date) + '.', 'Remove', function () { change(function () { Store.removeBehavior(x.id); }, 'Removed.'); }); } }, '✕'))); }))) : h('p', { class: 'small muted' }, 'No scores yet.'));
+    var def = h('input', { type: 'number', min: 1, max: 10, value: Store.behDefault(), id: 'beh-def' }), c4 = card(b, 'Default score');
+    c4.appendChild(h('p', { class: 'small muted' }, 'Each day starts at this score until you set one.')); c4.appendChild(h('div', { class: 'row' }, def, h('button', { class: 'btn small', style: { flex: '0 0 auto' }, onclick: function () { var v = Math.max(1, Math.min(10, Math.round(+def.value || 8))); change(function () { S().settings.behaviorDefault = v; S().settings._u = Store.now(); }, 'Default is now ' + v + '.'); } }, 'Save')));
   }
 
   function planView(b) {
