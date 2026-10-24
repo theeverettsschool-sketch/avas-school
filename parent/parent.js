@@ -89,17 +89,32 @@
     if (ks.length) { var c3 = card(b, 'Time by subject today'); c3.appendChild(h('table', null, h('tbody', null, ks.map(function (k) { return h('tr', null, h('td', null, subjName(k)), h('td', { class: 'r' }, fmt(subs[k]))); })))); }
   }
 
+  // ---------- v16 week navigation (Week + Behavior tabs); Today is unaffected ----------
+  var FIRST_WEEK = '2026-10-12';
+  function curMon() { return Store.mondayOf(today()); }
+  function viewMon() { var w = A.week || curMon(); if (w > curMon()) w = curMon(); if (w < FIRST_WEEK) w = FIRST_WEEK; return w; }
+  function viewEnd() { var e = Cal.addDays(viewMon(), 6); return e < today() ? e : today(); }
+  function weekNav() {
+    var mon = viewMon(), isCur = mon === curMon(), go = function (w) { A.week = w; render(); window.scrollTo(0, 0); };
+    var pick = h('input', { type: 'date', id: 'wk-pick', min: FIRST_WEEK, max: today(), value: mon, 'aria-label': 'Jump to the week of a date', style: { flex: '1', minWidth: '0' }, onchange: function () { if (pick.value) go(Store.mondayOf(pick.value)); } });
+    return h('div', { class: 'card', id: 'wk-nav', style: { display: 'flex', gap: '6px', alignItems: 'center', padding: '10px' } },
+      h('button', { class: 'btn small ghost', id: 'wk-prev', 'aria-label': 'Previous week', disabled: mon <= FIRST_WEEK ? true : null, onclick: function () { go(Cal.addDays(mon, -7)); } }, '‹'),
+      h('div', { style: { flex: '2', textAlign: 'center', fontWeight: 700, fontSize: '.9rem' }, id: 'wk-label' }, 'Week of ' + Cal.short(mon), h('div', { class: 'small muted', style: { fontWeight: 400 } }, isCur ? 'this week' : Cal.short(Cal.addDays(mon, 6)) + ' end')),
+      h('button', { class: 'btn small ghost', id: 'wk-next', 'aria-label': 'Next week', disabled: isCur ? true : null, onclick: function () { go(Cal.addDays(mon, 7)); } }, '›'),
+      pick, isCur ? null : h('button', { class: 'btn small', id: 'wk-this', onclick: function () { go(curMon()); } }, 'This week'));
+  }
   function weekView(b) {
-    var d = today(), mon = Store.mondayOf(d), r = Planner.weekSummary(d), st = S(), thr = Store.threshold(), planned = 0, done = 0;
+    b.appendChild(weekNav());
+    var d = viewEnd(), mon = viewMon(), isCur = mon === curMon(), r = Planner.weekSummary(d), st = S(), thr = Store.threshold(), planned = 0, done = 0;
     for (var i = 0; i < 7; i++) { var I = dayInfo(Cal.addDays(mon, i)); planned += I.lessons.length; done += I.done.length; }
     b.appendChild(h('div', { class: 'grid', style: { marginBottom: '12px' } },
-      h('div', { class: 'stat' }, h('span', { class: 'small muted' }, 'This week'), h('b', null, fmt(r.totalMins)), h('span', { class: 'small muted' }, r.counted + ' day(s) counted')),
-      h('div', { class: 'stat' }, h('span', { class: 'small muted' }, 'Assignments'), h('b', null, done + ' / ' + planned), h('span', { class: 'small muted' }, 'done this week'))));
+      h('div', { class: 'stat' }, h('span', { class: 'small muted' }, isCur ? 'This week' : 'That week'), h('b', null, fmt(r.totalMins)), h('span', { class: 'small muted' }, r.counted + ' day(s) counted')),
+      h('div', { class: 'stat' }, h('span', { class: 'small muted' }, 'Assignments'), h('b', null, done + ' / ' + planned), h('span', { class: 'small muted' }, isCur ? 'done this week' : 'done that week'))));
     var c = card(b, 'Week of ' + Cal.pretty(mon));
-    c.appendChild(addTimeBtn(null, '+ Add time', 'addtime-week'));
+    c.appendChild(addTimeBtn(isCur ? today() : Cal.addDays(mon, 4), '+ Add time', 'addtime-week'));
     c.appendChild(h('table', null, h('thead', null, h('tr', null, h('th', null, 'Day'), h('th', null, 'Minutes'), h('th', { class: 'r' }, 'Counts'))), h('tbody', null, r.days.map(function (x) { return h('tr', { 'data-day': x.date }, h('td', null, x.label, offlineList(x.date)), h('td', { style: { whiteSpace: 'nowrap' } }, x.mins + ' / ' + thr, bar(100 * x.mins / thr, x.counts), x.offline ? h('div', { class: 'small muted' }, 'incl. ' + x.offline + ' offline') : null), h('td', { class: 'r' }, x.counts ? '✓' : x.future ? 'coming up' : '', x.future ? null : h('div', null, addTimeBtn(x.date)))); }))));
-    var c2 = card(b, 'Quizzes and tests this week');
-    c2.appendChild(r.scores.length ? h('table', null, h('tbody', null, r.scores.map(function (x) { return h('tr', null, h('td', null, x.kind + ' · ' + Cal.short(x.date)), h('td', { class: 'r' }, h('b', null, x.pct + '%'), ' ' + x.right + '/' + x.total)); }))) : h('p', { class: 'small muted' }, 'None finished yet this week.'));
+    var c2 = card(b, isCur ? 'Quizzes and tests this week' : 'Quizzes and tests that week');
+    c2.appendChild(r.scores.length ? h('table', null, h('tbody', null, r.scores.map(function (x) { return h('tr', null, h('td', null, x.kind + ' · ' + Cal.short(x.date)), h('td', { class: 'r' }, h('b', null, x.pct + '%'), ' ' + x.right + '/' + x.total)); }))) : h('p', { class: 'small muted' }, isCur ? 'None finished yet this week.' : 'None finished that week.'));
     var c3 = card(b, 'Weekly summary');
     c3.appendChild(h('div', { class: 'text small', id: 'week-text', style: { fontFamily: 'inherit' } }, r.text));
     c3.appendChild(h('div', { class: 'row' }, h('button', { class: 'btn small', onclick: function () { if (navigator.share) navigator.share({ title: 'Weekly summary', text: r.text }).catch(function () { }); else if (navigator.clipboard) navigator.clipboard.writeText(r.text).then(function () { toast('Copied.'); }); } }, navigator.share ? 'Share' : 'Copy')));
@@ -253,11 +268,12 @@
     var note = h('textarea', { rows: 2, id: 'beh-note', placeholder: 'Note for Ava (she will see it)' }); c.appendChild(h('label', { for: 'beh-note' }, 'Note (optional)')); c.appendChild(note);
     c.appendChild(h('button', { class: 'btn gold wide', id: 'beh-save', style: { marginTop: '10px' }, onclick: function () { var rs = Store.REASONS.filter(function (r) { return pick.reasons[r]; }); change(function () { return Store.addBehavior(d, pick.score, rs, note.value.trim(), 'parent app'); }, 'Saved ' + pick.score + '/10 for ' + Cal.short(d) + '.'); } }, 'Save score'));
     paint();
-    var mon = Store.mondayOf(today()), a1 = Store.behWeekAvg(mon, today()), a0 = Store.behWeekAvg(Cal.addDays(mon, -7));
-    var c2 = card(b, 'Weekly average'); c2.appendChild(h('div', { class: 'grid' }, h('div', null, h('span', { class: 'small muted' }, 'This week'), h('b', { style: { display: 'block', fontSize: '1.4rem' }, id: 'beh-avg' }, a1 === null ? '–' : a1)), h('div', null, h('span', { class: 'small muted' }, 'Last week'), h('b', { style: { display: 'block', fontSize: '1.4rem' } }, a0 === null ? '–' : a0))));
-    var tr = h('div', { style: { display: 'flex', gap: '4px', marginTop: '10px' } }, Beh.trend(Store, today(), Cal).map(function (x) { var e = h('div', { style: { flex: '1', textAlign: 'center', opacity: x.set ? 1 : 0.5 } }); e.innerHTML = Beh.face(x.score, 30) + '<div class="small">' + Cal.parse(x.date).toLocaleDateString([], { weekday: 'narrow' }) + '</div>'; return e; })); c2.appendChild(tr);
+    b.appendChild(weekNav());
+    var mon = viewMon(), isCurW = mon === curMon(), a1 = Store.behWeekAvg(mon, isCurW ? today() : null), a0 = Store.behWeekAvg(Cal.addDays(mon, -7));
+    var c2 = card(b, 'Weekly average'); c2.appendChild(h('div', { class: 'grid' }, h('div', null, h('span', { class: 'small muted' }, isCurW ? 'This week' : 'Week of ' + Cal.short(mon)), h('b', { style: { display: 'block', fontSize: '1.4rem' }, id: 'beh-avg' }, a1 === null ? '–' : a1)), h('div', null, h('span', { class: 'small muted' }, 'Week before'), h('b', { style: { display: 'block', fontSize: '1.4rem' } }, a0 === null ? '–' : a0))));
+    var tr = h('div', { style: { display: 'flex', gap: '4px', marginTop: '10px' } }, Beh.trend(Store, isCurW ? today() : Cal.addDays(mon, 6), Cal).map(function (x) { var e = h('div', { style: { flex: '1', textAlign: 'center', opacity: x.set ? 1 : 0.5 } }); e.innerHTML = Beh.face(x.score, 30) + '<div class="small">' + Cal.parse(x.date).toLocaleDateString([], { weekday: 'narrow' }) + '</div>'; return e; })); c2.appendChild(tr);
     c2.appendChild(h('p', { class: 'small muted' }, 'School days without a score count as the default (' + Store.behDefault() + ').'));
-    var hist = Store.behEntries().reverse().slice(0, 30), c3 = card(b, 'History');
+    var wEnd = Cal.addDays(mon, 6), hist = Store.behEntries().filter(function (x) { return x.date >= mon && x.date <= wEnd; }).reverse(), c3 = card(b, 'History · week of ' + Cal.short(mon)); c3.id = 'beh-hist';
     c3.appendChild(hist.length ? h('table', null, h('tbody', null, hist.map(function (x) { var latest = Store.behLatest(x.date) === x; return h('tr', null, h('td', null, Cal.short(x.date), latest ? null : h('div', { class: 'small muted' }, 'replaced')), h('td', null, h('b', null, x.score)), h('td', { class: 'small' }, (x.reasons || []).join(', '), x.note ? h('div', { class: 'muted' }, x.note) : null), h('td', { class: 'r' }, h('button', { class: 'btn small ghost', onclick: function () { confirmBox('Remove this score?', x.score + '/10 on ' + Cal.pretty(x.date) + '.', 'Remove', function () { change(function () { Store.removeBehavior(x.id); }, 'Removed.'); }); } }, '✕'))); }))) : h('p', { class: 'small muted' }, 'No scores yet.'));
     var def = h('input', { type: 'number', min: 1, max: 10, value: Store.behDefault(), id: 'beh-def' }), c4 = card(b, 'Default score');
     c4.appendChild(h('p', { class: 'small muted' }, 'Each day starts at this score until you set one.')); c4.appendChild(h('div', { class: 'row' }, def, h('button', { class: 'btn small', style: { flex: '0 0 auto' }, onclick: function () { var v = Math.max(1, Math.min(10, Math.round(+def.value || 8))); change(function () { S().settings.behaviorDefault = v; S().settings._u = Store.now(); }, 'Default is now ' + v + '.'); } }, 'Save')));

@@ -1,5 +1,9 @@
 # Ava's School changelog
 
+# v16 (Oct 24 2026)
+- Parent app Week tab: ‹ › week arrows, "This week", and a date picker (weeks from Oct 12 2026 up to the current week). Days, offline entries, quizzes/tests and the weekly summary follow the viewed week; Add time defaults to that week (Friday for past weeks). Behavior tab: same week bar; weekly average, 7-day faces and history follow it. Today tab unchanged.
+- Kid behavior popup: parent note shown once. sw ava-school-v16, parent ava-parent-v5.
+
 # v15 (Oct 24 2026)
 - Automatic rough-day deductions (default ON, editable in parent app Money): score <= 4 is a rough day, 1-2 counts as two; per Mon-Sun week -$1, -$2, -$5, 4th = the whole week's earnings. Derived from the behavior log (nothing extra stored; recomputes when a score changes; a score raised after payday is given back). Shown in the unpaid breakdown, payout history, kid popup and star bank. Payouts record `auto` {week: usd}.
 - Quiz content: "dad" capitalization question reworded so the choices are consistent; proper-noun count question says multi-word names count once. Bank audit (2,922 items): no bad keys.

@@ -26,7 +26,7 @@
   function trend(Store, todayIso, Cal) { var out = []; for (var i = 6; i >= 0; i--) { var d = Cal.addDays(todayIso, -i); out.push({ date: d, score: Store.behScore(d), set: !!Store.behLatest(d) }); } return out; }
   // v14 automatic deduction lines: "Rough day (4): -$1. Note from your parent: ..."
   function money(n) { return '$' + (Math.round(n * 100) / 100).toFixed(2).replace(/\.00$/, ''); }
-  function dedLine(d, Cal) { return 'Rough day' + (d.units > 1 ? ' x2' : '') + ' (' + d.score + ')' + (Cal ? ', ' + Cal.short(d.date) : '') + ': ' + (d.lose ? 'lost the week\'s earnings (−' + money(d.usd) + ')' : '−' + money(d.usd)) + '.' + (d.note ? ' Note from your parent: ' + d.note : ''); }
+  function dedLine(d, Cal, noNote) { return 'Rough day' + (d.units > 1 ? ' x2' : '') + ' (' + d.score + ')' + (Cal ? ', ' + Cal.short(d.date) : '') + ': ' + (d.lose ? 'lost the week\'s earnings (−' + money(d.usd) + ')' : '−' + money(d.usd)) + '.' + (d.note && !noNote ? ' Note from your parent: ' + d.note : ''); }
   var Beh = { dedLine: dedLine, money: money, BANDS: BANDS, band: band, face: face, bars: bars, widget: widget, trend: trend };
   if (typeof module !== 'undefined' && module.exports) module.exports = Beh; else root.Beh = Beh;
 })(typeof window !== 'undefined' ? window : globalThis);
