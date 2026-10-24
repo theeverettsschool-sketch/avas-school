@@ -1,5 +1,11 @@
 # Ava's School changelog
 
+# v15 (Oct 24 2026)
+- Automatic rough-day deductions (default ON, editable in parent app Money): score <= 4 is a rough day, 1-2 counts as two; per Mon-Sun week -$1, -$2, -$5, 4th = the whole week's earnings. Derived from the behavior log (nothing extra stored; recomputes when a score changes; a score raised after payday is given back). Shown in the unpaid breakdown, payout history, kid popup and star bank. Payouts record `auto` {week: usd}.
+- Quiz content: "dad" capitalization question reworded so the choices are consistent; proper-noun count question says multi-word names count once. Bank audit (2,922 items): no bad keys.
+- Parent app Work: "Missed on first try (for review)" with her answer (saved from now on), separate from "Flagged in Finish my day".
+- Kid Parent → Overview: weekly summary back on top, Behavior card below it. sw ava-school-v15, parent ava-parent-v4.
+
 # v14 (Oct 24 2026)
 - Offline minutes in the parent app (Today, Week, and each day row): day, subject (incl. Music, Field trip), minutes, note, and "Fill the rest of the day to 270". Uses the same time entries (src 'parent', unique id, merged by id) the kid app's Parent → Overview writes; delete + Undo (restoreTime, newest action wins across devices). Offline minutes count toward the day's 270 and the 180, and are marked "offline" in the weekly summary and the Hours record. Kid Overview form gets the same subject list and a Fill button.
 - sw ava-school-v14, parent cache ava-parent-v3.

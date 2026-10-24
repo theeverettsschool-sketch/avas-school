@@ -273,7 +273,7 @@
   // ============================== finish / celebrate ==============================
   function badge(id, list) { if (!Store.state.badges[id]) { Store.state.badges[id] = { ts: Store.now(), _u: Store.now() }; list.push(id); } }
   // v4: work finished before the required time is up -> save it and wait on this page (nothing is marked done yet)
-  function missedItems(c) { var out = []; (c.missed || []).forEach(function (m) { var x = m && m.item; if (x && x.kind !== 'open' && out.length < 15) { try { out.push(JSON.parse(JSON.stringify(x))); } catch (e) { } } }); return out; }
+  function missedItems(c) { var out = []; (c.missed || []).forEach(function (m) { var x = m && m.item; if (x && x.kind !== 'open' && out.length < 15) { try { var cp = JSON.parse(JSON.stringify(x)); if (m.given !== undefined && m.given !== null && cp.given === undefined) cp.given = String(m.given).slice(0, 300); out.push(cp); } catch (e) { } } }); return out; }
   // v5: redo attempt from "Finish my day": only the missed items (math: a fresh similar set). No time is logged and no
   // regular stars; a small bonus per fixed item if the parent allows it. Result is saved on the day's review.
   Player.redo = function (id, date) {

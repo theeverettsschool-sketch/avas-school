@@ -162,11 +162,34 @@
     }
     return out;
   }
+  // ---------- v14 automatic behavior deductions (derived from the behavior log; nothing extra is stored) ----------
+  // Rough day = latest score <= 4 (a 1-2 counts as 2 rough days). Per Mon-Sun week, cumulative: 1st -$1, 2nd -$2, 3rd -$5,
+  // 4th or more = the whole week's earnings. Editing a score recomputes everything; payouts record what they applied.
+  function autoCfg() { var a = S.state.settings.autoDed || {}, t = Array.isArray(a.tiers) && a.tiers.length ? a.tiers.map(function (x) { return Math.max(0, +x || 0); }) : [1, 2, 5]; return { on: a.on !== false, tiers: t, loseAt: +a.loseAt >= 1 ? Math.round(+a.loseAt) : 4, max: +a.rough >= 1 ? +a.rough : 4 }; }
+  function autoWeek(w) {
+    var c = autoCfg(), days = [], units = 0, total = 0; if (!c.on) return null;
+    for (var i = 0; i < 7; i++) { var d = Cal.addDays(w, i), e = behLatest(d); if (!e || e.score > c.max) continue;
+      var u = e.score <= 2 ? 2 : 1, amt = 0, lose = false;
+      for (var k = 0; k < u; k++) { units++; if (units >= c.loseAt) lose = true; else amt += c.tiers[Math.min(units - 1, c.tiers.length - 1)]; }
+      days.push({ date: d, score: e.score, units: u, note: e.note || '', usd: r2(amt), lose: lose }); total += amt; }
+    if (!units) return null;
+    var lostWeek = units >= c.loseAt, earned = weekMoney(w).usd, amount = lostWeek ? r2(Math.max(total, earned)) : r2(total);
+    if (lostWeek) { var extra = r2(amount - total), first = days.filter(function (x) { return x.lose; })[0]; if (first) first.usd = r2(first.usd + extra); }
+    return { week: w, units: units, days: days, amount: amount, lostWeek: lostWeek };
+  }
+  function autoApplied() { var o = {}; payList().forEach(function (p) { for (var w in (p.auto || {})) o[w] = r2((o[w] || 0) + (+p.auto[w] || 0)); }); return o; }
+  function autoWeeks() {
+    var out = [], ap = autoApplied(), wk = {}, from = payFrom(), k;
+    var B = S.state.behavior || {}; for (k in B) if (B[k] && !B[k].removed && B[k].date >= from) wk[mondayOf(B[k].date)] = 1; for (k in ap) wk[k] = 1;
+    Object.keys(wk).sort().forEach(function (w) { var a = autoWeek(w) || { week: w, units: 0, days: [], amount: 0 }; a.applied = ap[w] || 0; a.due = r2(a.amount - a.applied); if (a.amount || a.applied) out.push(a); });
+    return out;
+  }
   function payBreakdown(todayIso) {
-    var due = weeksDue(), bon = 0, bw = bonusWeeks(todayIso), ap = adjApplied(), ded = 0, ds = deductions();
+    var due = weeksDue(), bon = 0, bw = bonusWeeks(todayIso), ap = adjApplied(), ded = 0, ds = deductions(), aw = autoWeeks(), autoDed = 0, credit = 0;
     bw.forEach(function (x) { bon += x.due; }); ds.forEach(function (d) { ded += deductLeft(d, ap); });
-    bon = r2(bon); ded = r2(ded); var gross = r2(due + bon), apply = Math.min(ded, gross);
-    return { weeks: due, bonus: bon, bonusWeeks: bw, deductions: ded, deductList: ds, applied: r2(apply), carry: r2(ded - apply), net: Math.max(0, r2(gross - apply)) };
+    aw.forEach(function (x) { if (x.due > 0) autoDed += x.due; else credit -= x.due; }); // a score raised after payday gives the money back
+    bon = r2(bon); ded = r2(ded + autoDed); credit = r2(credit); var gross = r2(due + bon + credit), apply = Math.min(ded, gross);
+    return { weeks: due, bonus: bon, bonusWeeks: bw, credit: credit, auto: r2(autoDed), autoWeeks: aw, manual: r2(ded - autoDed), deductions: ded, deductList: ds, applied: r2(apply), carry: r2(ded - apply), net: Math.max(0, r2(gross - apply)) };
   }
   function unpaid(todayIso) { return payBreakdown(todayIso).net; }
   function payList() { var P = S.state.payday || {}; return Object.keys(P).map(function (k) { return P[k]; }).filter(function (p) { return p && !p.void; }).sort(function (a, b) { return (b.ts || 0) - (a.ts || 0); }); }
@@ -176,12 +199,15 @@
   function nextPayId() { var n = 0, P = S.state.payday || {}; for (var k in P) { var m = /^pay-(\d+)$/.exec(k); if (m && +m[1] > n) n = +m[1]; } return 'pay-' + (n + 1); }
   function payNow(by, toSave, todayIso) {
     var rows = unpaidWeeks().filter(function (x) { return x.due > 0; }), B = payBreakdown(todayIso), bw = B.bonusWeeks.filter(function (x) { return x.due > 0; });
-    if (!rows.length && !bw.length) return null;
-    var P = S.state.payday || (S.state.payday = {}), id = nextPayId(), t = now(), weeks = {}, bonus = {}, adj = {}, gross = 0;
-    rows.forEach(function (x) { weeks[x.week] = x.due; gross += x.due; }); bw.forEach(function (x) { bonus[x.week] = x.due; gross += x.due; }); gross = r2(gross);
-    var left = Math.min(B.deductions, gross), ap = adjApplied(); B.deductList.forEach(function (d) { var k = Math.min(left, deductLeft(d, ap)); if (k > 0) { adj[d.id] = r2(k); left = r2(left - k); } });
-    var ded = 0; for (var k in adj) ded += adj[k]; ded = r2(ded); var amt = Math.max(0, r2(gross - ded));
-    var rec = P[id] = { id: id, date: todayIso || Cal.iso(new Date()), ts: t, amount: amt, gross: gross, weeks: weeks, bonus: bonus, adj: adj, deducted: ded, toSave: Math.max(0, Math.min(amt, r2(+toSave || 0))), by: by || 'parent', dev: S.state.device, _u: t };
+    if (!rows.length && !bw.length && !B.credit) return null;
+    var P = S.state.payday || (S.state.payday = {}), id = nextPayId(), t = now(), weeks = {}, bonus = {}, adj = {}, auto = {}, gross = 0;
+    rows.forEach(function (x) { weeks[x.week] = x.due; gross += x.due; }); bw.forEach(function (x) { bonus[x.week] = x.due; gross += x.due; });
+    B.autoWeeks.forEach(function (x) { if (x.due < 0) { auto[x.week] = x.due; gross -= x.due; } }); gross = r2(gross);
+    var left = Math.min(B.deductions, gross), ap = adjApplied();
+    B.autoWeeks.forEach(function (x) { var k = Math.min(left, Math.max(0, x.due)); if (k > 0) { auto[x.week] = r2(k); left = r2(left - k); } });
+    B.deductList.forEach(function (d) { var k = Math.min(left, deductLeft(d, ap)); if (k > 0) { adj[d.id] = r2(k); left = r2(left - k); } });
+    var ded = 0; for (var k in adj) ded += adj[k]; for (var w2 in auto) if (auto[w2] > 0) ded += auto[w2]; ded = r2(ded); var amt = Math.max(0, r2(gross - ded));
+    var rec = P[id] = { id: id, date: todayIso || Cal.iso(new Date()), ts: t, amount: amt, gross: gross, weeks: weeks, bonus: bonus, adj: adj, auto: auto, deducted: ded, toSave: Math.max(0, Math.min(amt, r2(+toSave || 0))), by: by || 'parent', dev: S.state.device, _u: t };
     // also mark the weeks paid in the v11 per-week map, so a not-yet-updated device shows them as paid too
     rows.forEach(function (x) { S.state.payouts[x.week] = { week: x.week, usd: r2(x.paid + x.due), stars: x.stars, paidAt: t, payId: id, _u: t }; });
     return rec;
@@ -393,7 +419,7 @@
 
   var api = {
     S: S, blank: blank, load: load, save: save, onChange: onChange, now: now, mondayOf: mondayOf,
-    addStars: addStars, weekStars: weekStars, weekMoney: weekMoney, totalOwed: totalOwed, markPaid: markPaid, RULES: RULES, unpaid: unpaid, weeksDue: weeksDue, payBreakdown: payBreakdown, bonusWeeks: bonusWeeks, bonusCfg: bonusCfg, addDeduction: addDeduction, undoDeduction: undoDeduction, deductions: deductions, adjApplied: adjApplied, deductLeft: deductLeft, REASONS: REASONS, behDefault: behDefault, behEntries: behEntries, behLatest: behLatest, behScore: behScore, addBehavior: addBehavior, removeBehavior: removeBehavior, behWeekAvg: behWeekAvg, unpaidWeeks: unpaidWeeks, paidByWeek: paidByWeek, payNow: payNow, undoPay: undoPay, payList: payList, savedTotal: savedTotal, nextPayId: nextPayId, payFrom: payFrom, PAY_FROM: PAY_FROM,
+    addStars: addStars, weekStars: weekStars, weekMoney: weekMoney, totalOwed: totalOwed, markPaid: markPaid, RULES: RULES, autoCfg: autoCfg, autoWeek: autoWeek, autoWeeks: autoWeeks, autoApplied: autoApplied, unpaid: unpaid, weeksDue: weeksDue, payBreakdown: payBreakdown, bonusWeeks: bonusWeeks, bonusCfg: bonusCfg, addDeduction: addDeduction, undoDeduction: undoDeduction, deductions: deductions, adjApplied: adjApplied, deductLeft: deductLeft, REASONS: REASONS, behDefault: behDefault, behEntries: behEntries, behLatest: behLatest, behScore: behScore, addBehavior: addBehavior, removeBehavior: removeBehavior, behWeekAvg: behWeekAvg, unpaidWeeks: unpaidWeeks, paidByWeek: paidByWeek, payNow: payNow, undoPay: undoPay, payList: payList, savedTotal: savedTotal, nextPayId: nextPayId, payFrom: payFrom, PAY_FROM: PAY_FROM,
     recordSkill: recordSkill, weakSkills: weakSkills, markAttendance: markAttendance, daysCounted: daysCounted, totalHours: totalHours,
     newId: newId, logTime: logTime, addTime: addTime, removeTime: removeTime, restoreTime: restoreTime, OFFLINE: OFFLINE, fillMins: fillMins, addOffline: addOffline, offlineEntries: offlineEntries, offlineMins: offlineMins, timeEntries: timeEntries, timeSecs: timeSecs, dayMinutes: dayMinutes, dayCounts: dayCounts, threshold: threshold,
     datesWithTime: datesWithTime, totalMinutes: totalMinutes, minutesBySubject: minutesBySubject, blockSecs: blockSecs, DEFAULT_RATE: DEFAULT_RATE, DEFAULT_CAP: DEFAULT_CAP,
