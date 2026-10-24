@@ -63,7 +63,7 @@
   function fmt(m) { m = Math.round(m); return m >= 60 ? Math.floor(m / 60) + ' h ' + (m % 60) + ' min' : m + ' min'; }
   function weekSummary(today) {
     var S = St(), st = S.state, o = st.settings, mon = S.mondayOf(today), sun = Cal.addDays(mon, 6), days = [], counted = 0, total = 0;
-    for (var i = 0; i < 7; i++) { var d = Cal.addDays(mon, i), mins = S.dayMinutes(d), school = Cal.isSchoolDay(d, o); if (!school && !mins) continue; var c = S.dayCounts(d); if (c) counted++; total += mins; days.push({ date: d, label: Cal.pretty(d), mins: mins, counts: c, school: school, future: d > today }); }
+    for (var i = 0; i < 7; i++) { var d = Cal.addDays(mon, i), mins = S.dayMinutes(d), school = Cal.isSchoolDay(d, o); if (!school && !mins) continue; var c = S.dayCounts(d); if (c) counted++; total += mins; days.push({ date: d, label: Cal.pretty(d), mins: mins, offline: S.offlineMins ? S.offlineMins(d) : 0, offNotes: S.offlineEntries ? S.offlineEntries(d).map(function (e) { var C = root.Content && root.Content.SUBJECTS && root.Content.SUBJECTS[e.subject]; return (C ? C.name : e.subject) + (e.note ? ' – ' + e.note : ''); }) : [], counts: c, school: school, future: d > today }); }
     var scores = root.Assess ? root.Assess.results(st, mon, sun) : [];
     var flags = []; Object.keys(st.reviews || {}).forEach(function (d) { if (d < mon || d > sun) return; var rev = st.reviews[d]; Object.keys(rev.items || {}).forEach(function (k) { var it = rev.items[k]; if (!it.flag) return; var res = it.cleared ? 'cleared by you' : it.redo && it.redo.passed ? 'fixed' : 'still to fix'; flags.push({ date: d, title: it.title + (it.what ? ' (' + it.what + ')' : ''), kind: it.kind === 'auto' ? 'Redo' : 'Try again', state: res }); }); });
     var money = S.weekMoney(mon), paid = st.payouts[mon] && st.payouts[mon].paidAt;
@@ -75,7 +75,7 @@
     var name = (st.profile && st.profile.name) || 'Ava', L = [];
     L.push(name + "'s School: week of " + Cal.pretty(r.week).replace(/^\w+, /, '') + ' to ' + Cal.pretty(r.through).replace(/^\w+, /, ''));
     L.push(''); L.push('Hours by day:');
-    r.days.forEach(function (d) { L.push('  ' + d.label + ': ' + fmt(d.mins) + (d.counts ? ' (counts toward 180)' : d.future ? ' (coming up)' : '')); });
+    r.days.forEach(function (d) { L.push('  ' + d.label + ': ' + fmt(d.mins) + (d.offline ? ' (incl. ' + fmt(d.offline) + ' offline: ' + d.offNotes.join(', ') + ')' : '') + (d.counts ? ' (counts toward 180)' : d.future ? ' (coming up)' : '')); });
     L.push('Total this week: ' + fmt(r.totalMins) + '. Days counted this week: ' + r.counted + '. School year so far: ' + r.daysCounted + ' of 180 days.');
     L.push('Lessons finished: ' + r.lessons + '.');
     L.push(''); L.push('Quizzes and tests:'); if (!r.scores.length) L.push('  None finished this week.'); r.scores.forEach(function (s) { L.push('  ' + s.kind + ' ' + s.date + ': ' + s.right + '/' + s.total + ' (' + s.pct + '%) first try' + (s.missed ? ', ' + s.missed + ' to practice' : '')); });

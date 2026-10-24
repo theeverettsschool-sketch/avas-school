@@ -1,5 +1,9 @@
 # Ava's School changelog
 
+# v14 (Oct 24 2026)
+- Offline minutes in the parent app (Today, Week, and each day row): day, subject (incl. Music, Field trip), minutes, note, and "Fill the rest of the day to 270". Uses the same time entries (src 'parent', unique id, merged by id) the kid app's Parent → Overview writes; delete + Undo (restoreTime, newest action wins across devices). Offline minutes count toward the day's 270 and the 180, and are marked "offline" in the weekly summary and the Hours record. Kid Overview form gets the same subject list and a Fill button.
+- sw ava-school-v14, parent cache ava-parent-v3.
+
 # v13 (Oct 23 2026)
 - Behavior tracker: `behavior` map (entry id -> {date, score 1-10, reasons, note, by, _u}); the day's score is the latest entry, default 8 (editable). Kid top bar shows a face + 5 half/full bars; tap for the parent's note and a 7-day trend (read-only). Kid Parent → Overview shows the score and history.
 - Parent app: Behavior tab (1-10 picker, reason chips, note, weekly average, history with remove, default setting). Money: behavior deductions ($ or stars, required reason, undo until paid out; `moneyAdj` map) that lower the unpaid balance (never below $0, extra carries over) and appear in payout history; optional weekly behavior bonus (+$X if the week's average >= Y, off by default).

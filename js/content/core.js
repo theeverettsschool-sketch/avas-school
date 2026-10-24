@@ -33,7 +33,8 @@
     math: { name: 'Math', color: '#2f6fed' }, grammar: { name: 'Language Arts', color: '#c2418c' }, spelling: { name: 'Spelling', color: '#8a4fd6' },
     reading: { name: 'Reading', color: '#d8561f' }, writing: { name: 'Writing', color: '#0e8f7a' }, science: { name: 'Science', color: '#2a9d3c' },
     social: { name: 'Social Studies', color: '#b8860b' }, bible: { name: 'Bible', color: '#5b4bb7' }, fun: { name: 'Game Day', color: '#e0457b' },
-    pe: { name: 'PE', color: '#d9480f' }, arts: { name: 'Arts and enrichment', color: '#7048e8' }
+    pe: { name: 'PE', color: '#d9480f' }, arts: { name: 'Arts and enrichment', color: '#7048e8' },
+    music: { name: 'Music', color: '#9c36b5' }, fieldtrip: { name: 'Field trip', color: '#0b7285' }
   };
 
   var api = C;

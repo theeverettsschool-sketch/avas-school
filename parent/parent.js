@@ -76,6 +76,7 @@
     var c = card(b, 'Today · ' + Cal.pretty(d));
     c.appendChild(h('div', { class: 'big' }, I.mins + ' ', h('span', { class: 'small muted' }, 'of ' + thr + ' min')));
     c.appendChild(bar(100 * I.mins / thr, I.counts)); c.appendChild(h('p', { class: 'small' }, I.counts ? '✓ Today counts toward the 180 days.' : (thr - I.mins > 0 ? (thr - I.mins) + ' more minutes for today to count.' : '')));
+    var ol = offlineList(d); if (ol) c.appendChild(ol); c.appendChild(addTimeBtn(d, '+ Add time', 'addtime-today'));
     b.appendChild(h('div', { class: 'grid', style: { marginBottom: '12px' } },
       h('div', { class: 'stat' }, h('span', { class: 'small muted' }, 'Assignments'), h('b', null, I.done.length + ' / ' + I.lessons.length), h('span', { class: 'small muted' }, 'done today')),
       h('div', { class: 'stat' }, h('span', { class: 'small muted' }, 'Days counted'), h('b', null, counted + ' / 180'), bar(100 * counted / 180, true)),
@@ -95,7 +96,8 @@
       h('div', { class: 'stat' }, h('span', { class: 'small muted' }, 'This week'), h('b', null, fmt(r.totalMins)), h('span', { class: 'small muted' }, r.counted + ' day(s) counted')),
       h('div', { class: 'stat' }, h('span', { class: 'small muted' }, 'Assignments'), h('b', null, done + ' / ' + planned), h('span', { class: 'small muted' }, 'done this week'))));
     var c = card(b, 'Week of ' + Cal.pretty(mon));
-    c.appendChild(h('table', null, h('thead', null, h('tr', null, h('th', null, 'Day'), h('th', null, 'Minutes'), h('th', { class: 'r' }, 'Counts'))), h('tbody', null, r.days.map(function (x) { return h('tr', null, h('td', null, x.label), h('td', null, x.mins + ' / ' + thr, bar(100 * x.mins / thr, x.counts)), h('td', { class: 'r' }, x.counts ? '✓' : x.future ? 'coming up' : '')); }))));
+    c.appendChild(addTimeBtn(null, '+ Add time', 'addtime-week'));
+    c.appendChild(h('table', null, h('thead', null, h('tr', null, h('th', null, 'Day'), h('th', null, 'Minutes'), h('th', { class: 'r' }, 'Counts'))), h('tbody', null, r.days.map(function (x) { return h('tr', { 'data-day': x.date }, h('td', null, x.label, offlineList(x.date)), h('td', { style: { whiteSpace: 'nowrap' } }, x.mins + ' / ' + thr, bar(100 * x.mins / thr, x.counts), x.offline ? h('div', { class: 'small muted' }, 'incl. ' + x.offline + ' offline') : null), h('td', { class: 'r' }, x.counts ? '✓' : x.future ? 'coming up' : '', x.future ? null : h('div', null, addTimeBtn(x.date)))); }))));
     var c2 = card(b, 'Quizzes and tests this week');
     c2.appendChild(r.scores.length ? h('table', null, h('tbody', null, r.scores.map(function (x) { return h('tr', null, h('td', null, x.kind + ' · ' + Cal.short(x.date)), h('td', { class: 'r' }, h('b', null, x.pct + '%'), ' ' + x.right + '/' + x.total)); }))) : h('p', { class: 'small muted' }, 'None finished yet this week.'));
     var c3 = card(b, 'Weekly summary');
@@ -198,6 +200,30 @@
     c4.appendChild(h('button', { class: 'btn wide', id: 'adj-go', style: { marginTop: '8px' }, onclick: function () { var k = Math.round(+n.value || 0), w = why.value.trim(); if (!k || !w) return toast('Enter stars and a reason.'); change(function () { return Store.addStars(k, 'Parent: ' + w, '', today(), today()); }, (k > 0 ? '+' : '') + k + ' stars saved.'); } }, 'Save adjustment'));
     var adj = Object.keys(st.ledger).map(function (k) { return st.ledger[k]; }).filter(function (e) { return /^Parent:/.test(e.why || ''); }).sort(function (a, b) { return b.ts - a.ts; }).slice(0, 10);
     if (adj.length) c4.appendChild(h('table', { style: { marginTop: '8px' } }, h('tbody', null, adj.map(function (e) { return h('tr', null, h('td', null, Cal.short(e.date)), h('td', null, e.why.replace(/^Parent: /, '')), h('td', { class: 'r' }, (e.stars > 0 ? '+' : '') + e.stars)); }))));
+  }
+
+  // ---------- v14 offline minutes (same time entries the kid app's Parent -> Overview writes) ----------
+  function addTimeForm(date) {
+    var d0 = date || today(), thr = Store.threshold();
+    var dIn = h('input', { type: 'date', id: 'at-date', value: d0, max: today() }), sub = h('select', { id: 'at-subj' }, Store.OFFLINE.filter(function (o) { return o[0] !== 'writing' && o[0] !== 'arts'; }).map(function (o) { return h('option', { value: o[0] }, o[1]); }));
+    var mIn = h('input', { type: 'number', id: 'at-mins', min: 1, max: 720, inputmode: 'numeric', placeholder: 'minutes' }), note = h('input', { id: 'at-note', placeholder: 'Note (e.g., Georgia Aquarium)' }), info = h('p', { class: 'small muted', id: 'at-info' });
+    function upd() { var d = dIn.value || d0; info.textContent = Cal.pretty(d) + ': ' + Store.dayMinutes(d) + ' of ' + thr + ' min so far' + (Store.dayCounts(d) ? ' (already counts ✓)' : ', ' + Store.fillMins(d) + ' to go') + '.'; }
+    dIn.addEventListener('change', upd);
+    var m = h('div', { class: 'modal' }, h('div', { id: 'addtime' }, h('h2', { style: { margin: '0 0 4px' } }, 'Add time'), h('p', { class: 'small muted', style: { margin: 0 } }, 'Learning away from the app: field trips, read-alouds, sports, church class.'),
+      h('label', { for: 'at-date' }, 'Day'), dIn, h('label', { for: 'at-subj' }, 'Subject'), sub, h('label', { for: 'at-mins' }, 'Minutes'), mIn,
+      h('button', { class: 'btn small ghost', id: 'at-fill', style: { marginTop: '8px' }, onclick: function () { var f = Store.fillMins(dIn.value || d0); if (!f) return toast('That day already has ' + thr + '+ minutes.'); mIn.value = f; } }, '⚡ Fill the rest of the day to ' + thr),
+      info, h('label', { for: 'at-note' }, 'Note (optional)'), note,
+      h('div', { class: 'row', style: { marginTop: '14px' } }, h('button', { class: 'btn ghost', onclick: function () { m.remove(); } }, 'Cancel'), h('button', { class: 'btn gold', id: 'at-save', onclick: function () {
+        var d = dIn.value, n = Math.round(+mIn.value || 0); if (!d || d > today()) return toast('Pick today or a past day.'); if (n < 1 || n > 720) return toast('Enter 1 to 720 minutes.');
+        m.remove(); change(function () { return Store.addOffline({ date: d, subject: sub.value, mins: n, note: note.value, by: 'parent app' }); }, function () { return n + ' min added to ' + Cal.short(d) + (Store.dayCounts(d) ? ' – day counts ✓' : ''); });
+      } }, 'Add'))));
+    document.body.appendChild(m); upd();
+  }
+  function addTimeBtn(date, label, id) { return h('button', { class: 'btn small' + (label ? '' : ' ghost'), id: id || null, 'data-addtime': date || '', 'aria-label': 'Add time' + (date ? ' for ' + date : ''), onclick: function (e) { e.stopPropagation(); addTimeForm(date); } }, label || '＋'); }
+  function offlineList(d) {
+    var L = Store.offlineEntries(d, true); if (!L.length) return null;
+    return h('div', { class: 'offl', 'data-off': d }, L.map(function (e) { var gone = !!e.removed; return h('div', { class: 'small', style: { display: 'flex', gap: '6px', alignItems: 'center', margin: '3px 0', opacity: gone ? 0.55 : 1 } }, h('span', { class: 'tag' }, 'offline'), h('span', { style: { flex: '1' } }, (gone ? h('s', null, Math.round((e.prevSecs || 0) / 60) + ' min') : Math.round(e.secs / 60) + ' min') , ' ' + subjName(e.subject) + (e.note ? ' – ' + e.note : '')),
+      gone ? h('button', { class: 'btn small ghost', 'data-undo': e.id, onclick: function () { change(function () { Store.restoreTime(e.id); }, 'Restored.'); } }, 'Undo') : h('button', { class: 'btn small ghost', 'data-del': e.id, 'aria-label': 'Delete', onclick: function () { change(function () { Store.removeTime(e.id); }, 'Deleted. Tap Undo to bring it back.'); } }, '✕')); }));
   }
 
   function behaviorView(b) {

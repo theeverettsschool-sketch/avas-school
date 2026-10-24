@@ -223,7 +223,20 @@
     e._u = now(); syncLegacy(e.date); return e;
   }
   function addTime(fields) { return logTime(newId(fields.src === 'parent' ? 'p' : 't'), fields); }
-  function removeTime(id) { var e = S.state.time[id]; if (!e) return; e.secs = 0; e.removed = true; e._u = now(); syncLegacy(e.date); }
+  function removeTime(id) { var e = S.state.time[id]; if (!e) return; if (e.secs > 0) e.prevSecs = e.secs; e.secs = 0; e.removed = true; e._u = Math.max(now(), (e._u || 0) + 1); syncLegacy(e.date); }
+  // v14 undo a removal (same id, newer _u, so the merge keeps the restored copy on every device)
+  function restoreTime(id) { var e = S.state.time[id]; if (!e || !e.removed || !e.prevSecs) return false; e.secs = e.prevSecs; delete e.removed; e._u = Math.max(now(), (e._u || 0) + 1); syncLegacy(e.date); return true; }
+  // v14 offline minutes (field trips, read-alouds, sports...). Same records the kid app's Parent -> Overview has always
+  // written: time entries with src 'parent' and a unique id, merged by id across devices. Both apps use these helpers.
+  var OFFLINE = [['math', 'Math', 'math'], ['grammar', 'Grammar', 'grammar'], ['spelling', 'Spelling', 'spelling'], ['reading', 'Reading', 'novel'], ['science', 'Science', 'science'], ['social', 'History', 'social'], ['bible', 'Bible', 'bible'], ['music', 'Music', 'rotation'], ['pe', 'PE', 'pe'], ['fieldtrip', 'Field trip', 'fieldtrip'], ['writing', 'Writing', 'writing'], ['arts', 'Art', 'rotation']];
+  function fillMins(dateIso) { return Math.max(0, threshold() - dayMinutes(dateIso)); }
+  function addOffline(f) {
+    var mins = Math.max(0, Math.min(720, Math.round(+f.mins || 0))); if (!mins || !/^\d{4}-\d\d-\d\d$/.test(f.date || '')) return null;
+    var o = OFFLINE.filter(function (x) { return x[0] === f.subject; })[0] || OFFLINE[9];
+    return addTime({ date: f.date, secs: mins * 60, subject: o[0], block: o[2], src: 'parent', note: String(f.note || '').trim().slice(0, 200), by: f.by });
+  }
+  function offlineEntries(dateIso, incRemoved) { var out = [], T = S.state.time || {}; for (var k in T) { var e = T[k]; if (e && e.src === 'parent' && (!dateIso || e.date === dateIso) && (incRemoved ? (e.secs > 0 || e.prevSecs) : (!e.removed && e.secs > 0))) out.push(e); } return out.sort(function (a, b) { return (a.ts || 0) - (b.ts || 0); }); }
+  function offlineMins(dateIso) { var t = 0; offlineEntries(dateIso).forEach(function (e) { t += e.secs; }); return Math.floor(t / 60); }
   // v4: when an assignment was credited (src 'credit', id cr-<date>-<lesson>), that credit REPLACES the tap/timer time
   // logged for the same lesson on the same date, so nothing is counted twice (also across devices after a sync).
   function creditId(dateIso, lessonId) { return 'cr-' + dateIso + '-' + lessonId; }
@@ -382,7 +395,7 @@
     S: S, blank: blank, load: load, save: save, onChange: onChange, now: now, mondayOf: mondayOf,
     addStars: addStars, weekStars: weekStars, weekMoney: weekMoney, totalOwed: totalOwed, markPaid: markPaid, RULES: RULES, unpaid: unpaid, weeksDue: weeksDue, payBreakdown: payBreakdown, bonusWeeks: bonusWeeks, bonusCfg: bonusCfg, addDeduction: addDeduction, undoDeduction: undoDeduction, deductions: deductions, adjApplied: adjApplied, deductLeft: deductLeft, REASONS: REASONS, behDefault: behDefault, behEntries: behEntries, behLatest: behLatest, behScore: behScore, addBehavior: addBehavior, removeBehavior: removeBehavior, behWeekAvg: behWeekAvg, unpaidWeeks: unpaidWeeks, paidByWeek: paidByWeek, payNow: payNow, undoPay: undoPay, payList: payList, savedTotal: savedTotal, nextPayId: nextPayId, payFrom: payFrom, PAY_FROM: PAY_FROM,
     recordSkill: recordSkill, weakSkills: weakSkills, markAttendance: markAttendance, daysCounted: daysCounted, totalHours: totalHours,
-    newId: newId, logTime: logTime, addTime: addTime, removeTime: removeTime, timeEntries: timeEntries, timeSecs: timeSecs, dayMinutes: dayMinutes, dayCounts: dayCounts, threshold: threshold,
+    newId: newId, logTime: logTime, addTime: addTime, removeTime: removeTime, restoreTime: restoreTime, OFFLINE: OFFLINE, fillMins: fillMins, addOffline: addOffline, offlineEntries: offlineEntries, offlineMins: offlineMins, timeEntries: timeEntries, timeSecs: timeSecs, dayMinutes: dayMinutes, dayCounts: dayCounts, threshold: threshold,
     datesWithTime: datesWithTime, totalMinutes: totalMinutes, minutesBySubject: minutesBySubject, blockSecs: blockSecs, DEFAULT_RATE: DEFAULT_RATE, DEFAULT_CAP: DEFAULT_CAP,
     creditLesson: creditLesson, credited: credited, creditId: creditId,
     touchStreak: touchStreak, merge: merge, adopt: adopt, allDayMinutes: allDayMinutes, exportAll: exportAll, importAll: importAll, exportCSV: exportCSV, exportRange: exportRange, hashPin: hashPin,
