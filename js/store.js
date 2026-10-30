@@ -344,6 +344,11 @@
     m.makeupLog = mergeMap(m.makeupLog, r.makeupLog);
     // v12 payday: union by payout id; the same id (both devices paid from the same point) keeps the newest copy
     m.payday = mergeMap(local.payday, remote.payday);
+    // sweep fix: two devices that each paid a DIFFERENT payout while out of sync made the same pay-N id, and the merge
+    // kept only one, so real cash handed over vanished from the record. Keep the other copy under its own id.
+    (function () { var LP = local.payday || {}, RP = remote.payday || {}; for (var id in LP) { var x = LP[id], y = RP[id]; if (!x || !y || x.dev === y.dev) continue;
+      var same = JSON.stringify(x.weeks || {}) === JSON.stringify(y.weeks || {}) && +x.amount === +y.amount && JSON.stringify(x.bonus || {}) === JSON.stringify(y.bonus || {});
+      if (same) continue; var lose = m.payday[id] === x ? y : x, nid = id + '-' + (lose.dev || 'x'); if (!m.payday[nid]) m.payday[nid] = Object.assign({}, lose, { id: nid, splitFrom: id }); } })();
     // v13 behavior log + money deductions: union by entry id (two devices' entries are both kept), newest edit per id wins
     m.behavior = mergeMap(local.behavior, remote.behavior);
     m.moneyAdj = mergeMap(local.moneyAdj, remote.moneyAdj);
