@@ -781,15 +781,34 @@
     save: function (T) { try { localStorage.setItem(TKEY, JSON.stringify(T)); } catch (e) { } },
     get: function (id, date) { var T = Timers.all(), t = T[id]; return t && t.date === date ? t : null; },
     elapsed: function (t) { if (!t) return 0; var e = t.acc + (t.start ? (Date.now() - t.start) / 1000 : 0); return Math.min(e, t.cap); },
-    start: function (L, date) { var T = Timers.all(), t = T[L.id]; if (!t || t.date !== date) t = { id: L.id, date: date, acc: 0, start: null, cap: L.mins * 60, block: L.block, subject: L.subject, sess: 'tm-' + Store.state.device + '-' + L.id + '-' + date }; if (t.cap < L.mins * 60) t.cap = L.mins * 60; if (!t.start) t.start = Date.now(); T[L.id] = t; Timers.save(T); Timers.log(t); return t; },
+    start: function (L, date) { var T = Timers.all(), t = T[L.id]; if (!t || t.date !== date) t = { id: L.id, date: date, acc: 0, start: null, cap: L.mins * 60, block: L.block, subject: L.subject, sess: 'tm-' + Store.state.device + '-' + L.id + '-' + date }; if (t.cap < L.mins * 60) t.cap = L.mins * 60; if (!t.start) { t.start = Date.now(); t.seen = t.start; delete t.idleFrom; Timers.lastAct = t.start; } T[L.id] = t; Timers.save(T); Timers.log(t); return t; },
     pause: function (id) { var T = Timers.all(), t = T[id]; if (!t || !t.start) return t; t.acc = Timers.elapsed(t); t.start = null; Timers.save(T); Timers.log(t); return t; },
     extend: function (id, secs) { var T = Timers.all(), t = T[id]; if (!t) return; t.cap += secs; Timers.save(T); },
     log: function (t) { var e = Timers.elapsed(t); if (e >= 1) { Store.logTime(t.sess, { date: t.date, secs: e, subject: t.subject, block: t.block, lesson: t.id, src: 'timer' }); Store.save(); } },
     // called every few seconds by app.js
-    tick: function () { var T = Timers.all(), ch = false; for (var id in T) { var t = T[id]; if (t.start) { Timers.log(t); if (Timers.elapsed(t) >= t.cap) { t.acc = t.cap; t.start = null; ch = true; t.reached = true; if (root.UI) UI.toast('⏰ Time is up for ' + (Plan.find(id) || { title: 'your timer' }).title + '!', 4000); UI.sound && UI.sound('win'); } } } if (ch) Timers.save(T); return ch; },
+    // v17 'still going?': a running timer only credits real time. With no tap for IDLE ms, or after the iPad slept / the
+    // app was closed, it pauses at the last moment we know she was there and asks. 'Yes' credits the gap (reading with
+    // the screen off is real time); 'I stopped' keeps only the time before. Nothing logged is ever lowered.
+    IDLE: 5 * 60000, lastAct: Date.now(), hiddenAt: 0,
+    cut: function (t, n) { var c = Math.min(n, Timers.lastAct + Timers.IDLE); if (Timers.hiddenAt) c = Math.min(c, Timers.hiddenAt); if (t.seen && n - t.seen > 90000) c = Math.min(c, t.seen); return Math.max(c, t.start); },
+    idleCheck: function () { var T = Timers.all(), n = Date.now(), hit = null, ch = false;
+      for (var id in T) { var t = T[id]; if (!t.start) continue; var c = Timers.cut(t, n); if (c < n - 2000) { t.acc = Math.min(t.cap, t.acc + (c - t.start) / 1000); t.start = null; t.idleFrom = c; ch = true; hit = t; } else t.seen = n; }
+      Timers.save(T); if (ch) { for (var k in T) if (T[k].idleFrom) Timers.log(T[k]); if (!document.hidden) Timers.ask(); } return ch; },
+    ask: function () { if (Timers.asking || !root.UI || !UI.modal) return; var T = Timers.all(), L = []; for (var id in T) if (T[id].idleFrom) L.push(T[id]); if (!L.length) return; Timers.asking = true;
+      var names = L.map(function (t) { return (Plan.find(t.id) || { title: 'this block' }).title; }).join(', ');
+      var m = UI.modal(h('div', { id: 'timer-still' }, h('h2', null, 'Still going? ⏱️'), h('p', null, 'The timer for ' + names + ' paused because nothing happened for a while (or the iPad went to sleep). Were you still doing it?'),
+        h('div', { class: 'row', style: { justifyContent: 'flex-end' } },
+          h('button', { class: 'btn ghost', id: 'timer-stopped', onclick: function () { Timers.resolve(false); m.close(); } }, 'I stopped'),
+          h('button', { class: 'btn gold', id: 'timer-going', onclick: function () { Timers.resolve(true); m.close(); } }, 'Yes, still going'))), { dismiss: false }); },
+    resolve: function (yes) { var T = Timers.all(), n = Date.now(); Timers.asking = false; Timers.lastAct = n;
+      for (var id in T) { var t = T[id]; if (!t.idleFrom) continue; if (yes) { t.acc = Math.min(t.cap, t.acc + (n - t.idleFrom) / 1000); if (t.acc < t.cap) { t.start = n; t.seen = n; } } delete t.idleFrom; Timers.log(t); }
+      Timers.save(T); if (root.Home && (location.hash === '' || location.hash === '#/')) Home.render(); },
+    tick: function () { Timers.idleCheck(); var T = Timers.all(), ch = false; for (var id in T) { var t = T[id]; if (t.start) { Timers.log(t); if (Timers.elapsed(t) >= t.cap) { t.acc = t.cap; t.start = null; ch = true; t.reached = true; if (root.UI) UI.toast('⏰ Time is up for ' + (Plan.find(id) || { title: 'your timer' }).title + '!', 4000); UI.sound && UI.sound('win'); } } } if (ch) Timers.save(T); return ch; },
     running: function () { var T = Timers.all(), out = []; for (var id in T) if (T[id].start) out.push(T[id]); return out; }
   };
   Player.Timers = Timers;
+  if (root.addEventListener) { ['pointerdown', 'keydown', 'touchstart'].forEach(function (ev) { root.addEventListener(ev, function () { Timers.lastAct = Date.now(); }, { passive: true, capture: true }); });
+    document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden') Timers.hiddenAt = Date.now(); else { var away = Timers.hiddenAt && Date.now() - Timers.hiddenAt; if (away && away < 60000) Timers.hiddenAt = 0; Timers.idleCheck(); Timers.hiddenAt = 0; Timers.lastAct = Date.now(); Timers.ask(); } }); }
   function fmtClock(secs) { secs = Math.max(0, Math.round(secs)); var m = Math.floor(secs / 60), s2 = secs % 60; return m + ':' + (s2 < 10 ? '0' : '') + s2; }
   Player.fmtClock = fmtClock;
   // Music lessons ask her to listen to a piece, so give her a button that finds a recording (opens in a new tab;

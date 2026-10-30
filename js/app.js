@@ -47,6 +47,14 @@
   if (!window.__noAutoStart) { UI.dispatch(); trySync(); }
 
   // offline support
-  if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) { navigator.serviceWorker.register('sw.js').catch(function () { }); }
+  if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) { navigator.serviceWorker.register('sw.js').then(function (reg) {
+    // v17 'new version' banner: the service worker activates the new files at once (skipWaiting + claim); tell her so one tap loads them.
+    var had = !!navigator.serviceWorker.controller, shown = false;
+    navigator.serviceWorker.addEventListener('controllerchange', function () { if (!had) { had = true; return; } if (shown) return; shown = true;
+      var b = document.createElement('button'); b.id = 'update-banner'; b.type = 'button'; b.textContent = '✨ New version ready – tap to refresh';
+      b.setAttribute('style', 'position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom));z-index:9999;padding:12px 18px;border:0;border-radius:999px;background:#1b2a4e;color:#fff;font:600 16px system-ui,sans-serif;box-shadow:0 4px 16px rgba(0,0,0,.3)');
+      b.onclick = function () { try { if (window.Store) Store.save(); } catch (e) { } location.reload(); }; document.body.appendChild(b); });
+    document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible' && reg && reg.update) reg.update().catch(function () { }); });
+  }).catch(function () { }); }
   if (UI.canSpeak()) { try { speechSynthesis.getVoices(); } catch (e) { } }
 })();

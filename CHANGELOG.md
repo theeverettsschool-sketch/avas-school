@@ -1,3 +1,13 @@
+# v17 (Oct 30, 2026) – kid cache ava-school-v17, parent cache ava-parent-v6
+- Money: weeks paid more than earned (two devices or a double tap) are flagged on the parent Money tab with an Undo for each payout.
+- Sync fix: two devices that each paid a different payout while out of sync no longer lose one of them (the second is kept as pay-N-<device>; identical payouts still collapse to one).
+- Sync fix: a temporary sign-in server error no longer signs the family out.
+- Timers: 'Still going?' after 5 idle minutes or when the iPad slept; only real time is credited ('Yes' adds the gap, capped at the block).
+- 'New version ready – tap to refresh' banner in both apps.
+- Parent → Plan: printable 180-day summary (date, minutes per subject, counted days, totals, signature line).
+- Parent: weekly backup reminder that downloads the full JSON backup.
+- A stars-per-$1 (or weekly max) of 0 or blank uses the default.
+
 # Ava's School changelog
 
 # v16 (Oct 24 2026)

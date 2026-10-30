@@ -96,9 +96,9 @@
   }
   // Money for a week: stars / starsPerDollar, rounded down to cents, capped.
   function weekMoney(weekMonday) {
-    var st = S.state.settings, raw = weekStars(weekMonday) / st.starsPerDollar;
-    var usd = Math.min(st.weeklyCapUSD, Math.floor(raw * 100) / 100);
-    return { stars: weekStars(weekMonday), raw: Math.floor(raw * 100) / 100, usd: usd, capped: raw > st.weeklyCapUSD };
+    var st = S.state.settings, rate = +st.starsPerDollar > 0 ? +st.starsPerDollar : DEFAULT_RATE, cap = +st.weeklyCapUSD > 0 ? +st.weeklyCapUSD : DEFAULT_CAP, raw = weekStars(weekMonday) / rate; // v17: 0/blank = default
+    var usd = Math.min(cap, Math.floor(raw * 100) / 100);
+    return { stars: weekStars(weekMonday), raw: Math.floor(raw * 100) / 100, usd: usd, capped: raw > cap };
   }
   function totalOwed() { return unpaid(); }
   function totalOwedV11() {
@@ -122,6 +122,15 @@
   function unpaidWeeks() {
     var weeks = {}, from = payFrom(), pb = paidByWeek(), L = S.state.ledger; for (var k in L) if (L[k].week >= from) weeks[L[k].week] = 1;
     return Object.keys(weeks).sort().map(function (w) { var m = weekMoney(w), paid = pb[w] || 0; return { week: w, stars: m.stars, earned: m.usd, capped: m.capped, paid: paid, due: Math.max(0, r2(m.usd - paid)) }; });
+  }
+  // v17: weeks where recorded payouts are more than the week earned (two devices paid the same week, or a double tap).
+  // Read-only; derived from payday records. Undo = undoPay(id) on one of the listed payouts (voids it, merges by id).
+  function overpaidWeeks() {
+    var P = S.state.payday || {}, by = {}, out = [], id, w;
+    for (id in P) { var p = P[id]; if (!p || p.void) continue; for (w in (p.weeks || {})) if (+p.weeks[w] > 0) (by[w] = by[w] || []).push(p); }
+    var pb = paidByWeek();
+    Object.keys(by).sort().forEach(function (w) { var earned = weekMoney(w).usd, paid = pb[w] || 0; if (paid > r2(earned + 0.005)) out.push({ week: w, earned: earned, paid: paid, over: r2(paid - earned), payouts: by[w].slice().sort(function (a, b) { return (a.ts || 0) - (b.ts || 0); }), double: by[w].length > 1 }); });
+    return out;
   }
   function weeksDue() { var t = 0; unpaidWeeks().forEach(function (x) { t += x.due; }); return r2(t); }
   // ---------- v13 behavior ----------
@@ -348,7 +357,7 @@
     // kept only one, so real cash handed over vanished from the record. Keep the other copy under its own id.
     (function () { var LP = local.payday || {}, RP = remote.payday || {}; for (var id in LP) { var x = LP[id], y = RP[id]; if (!x || !y || x.dev === y.dev) continue;
       var same = JSON.stringify(x.weeks || {}) === JSON.stringify(y.weeks || {}) && +x.amount === +y.amount && JSON.stringify(x.bonus || {}) === JSON.stringify(y.bonus || {});
-      if (same) continue; var lose = m.payday[id] === x ? y : x, nid = id + '-' + (lose.dev || 'x'); if (!m.payday[nid]) m.payday[nid] = Object.assign({}, lose, { id: nid, splitFrom: id }); } })();
+      if (same) continue; var xw = (x._u || 0) > (y._u || 0) || ((x._u || 0) === (y._u || 0) && String(x.dev) > String(y.dev)), win = xw ? x : y, lose = xw ? y : x; m.payday[id] = win; var nid = id + '-' + (lose.dev || 'x'); if (!m.payday[nid]) m.payday[nid] = Object.assign({}, lose, { id: nid, splitFrom: id }); } })();
     // v13 behavior log + money deductions: union by entry id (two devices' entries are both kept), newest edit per id wins
     m.behavior = mergeMap(local.behavior, remote.behavior);
     m.moneyAdj = mergeMap(local.moneyAdj, remote.moneyAdj);
@@ -424,7 +433,7 @@
 
   var api = {
     S: S, blank: blank, load: load, save: save, onChange: onChange, now: now, mondayOf: mondayOf,
-    addStars: addStars, weekStars: weekStars, weekMoney: weekMoney, totalOwed: totalOwed, markPaid: markPaid, RULES: RULES, autoCfg: autoCfg, autoWeek: autoWeek, autoWeeks: autoWeeks, autoApplied: autoApplied, unpaid: unpaid, weeksDue: weeksDue, payBreakdown: payBreakdown, bonusWeeks: bonusWeeks, bonusCfg: bonusCfg, addDeduction: addDeduction, undoDeduction: undoDeduction, deductions: deductions, adjApplied: adjApplied, deductLeft: deductLeft, REASONS: REASONS, behDefault: behDefault, behEntries: behEntries, behLatest: behLatest, behScore: behScore, addBehavior: addBehavior, removeBehavior: removeBehavior, behWeekAvg: behWeekAvg, unpaidWeeks: unpaidWeeks, paidByWeek: paidByWeek, payNow: payNow, undoPay: undoPay, payList: payList, savedTotal: savedTotal, nextPayId: nextPayId, payFrom: payFrom, PAY_FROM: PAY_FROM,
+    addStars: addStars, weekStars: weekStars, weekMoney: weekMoney, totalOwed: totalOwed, markPaid: markPaid, RULES: RULES, autoCfg: autoCfg, autoWeek: autoWeek, autoWeeks: autoWeeks, autoApplied: autoApplied, unpaid: unpaid, weeksDue: weeksDue, overpaidWeeks: overpaidWeeks, undoPay: undoPay, payBreakdown: payBreakdown, bonusWeeks: bonusWeeks, bonusCfg: bonusCfg, addDeduction: addDeduction, undoDeduction: undoDeduction, deductions: deductions, adjApplied: adjApplied, deductLeft: deductLeft, REASONS: REASONS, behDefault: behDefault, behEntries: behEntries, behLatest: behLatest, behScore: behScore, addBehavior: addBehavior, removeBehavior: removeBehavior, behWeekAvg: behWeekAvg, unpaidWeeks: unpaidWeeks, paidByWeek: paidByWeek, payNow: payNow, undoPay: undoPay, payList: payList, savedTotal: savedTotal, nextPayId: nextPayId, payFrom: payFrom, PAY_FROM: PAY_FROM,
     recordSkill: recordSkill, weakSkills: weakSkills, markAttendance: markAttendance, daysCounted: daysCounted, totalHours: totalHours,
     newId: newId, logTime: logTime, addTime: addTime, removeTime: removeTime, restoreTime: restoreTime, OFFLINE: OFFLINE, fillMins: fillMins, addOffline: addOffline, offlineEntries: offlineEntries, offlineMins: offlineMins, timeEntries: timeEntries, timeSecs: timeSecs, dayMinutes: dayMinutes, dayCounts: dayCounts, threshold: threshold,
     datesWithTime: datesWithTime, totalMinutes: totalMinutes, minutesBySubject: minutesBySubject, blockSecs: blockSecs, DEFAULT_RATE: DEFAULT_RATE, DEFAULT_CAP: DEFAULT_CAP,
