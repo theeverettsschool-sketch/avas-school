@@ -48,7 +48,7 @@
     var app = document.getElementById('app'); app.innerHTML = '';
     if (!Sync.cfg) { app.appendChild(h('main', null, h('div', { class: 'card' }, 'Firebase settings are missing (config.js).'))); return; }
     if (!Sync.auth) return login(app);
-    var body = h('main'); var fn = { today: todayView, week: weekView, behavior: behaviorView, work: workView, money: moneyView, plan: planView }[A.tab] || todayView;
+    var body = h('main'); var fn = { summary: summaryView, today: todayView, week: weekView, behavior: behaviorView, work: workView, money: moneyView, plan: planView }[A.tab] || todayView;
     try { fn(body); } catch (e) { body.appendChild(h('div', { class: 'card' }, h('h2', null, 'This screen hit a problem'), h('p', { class: 'small muted' }, String(e && e.message || e)))); }
     app.appendChild(h('header', null, h('h1', null, ((S().profile && S().profile.name) || 'Ava') + "'s School · Parent"), h('button', { class: 'sync', onclick: function () { sync().then(render); } }, syncLabel())));
     app.appendChild(body);
@@ -72,6 +72,7 @@
   }
   function todayView(b) {
     var st = S(), d = today(), I = dayInfo(d), thr = Store.threshold(), counted = Store.daysCounted();
+    backupCard(b, false);
     if (!A.synced && !Sync.last) b.appendChild(h('div', { class: 'card small muted' }, 'Showing the copy saved on this phone. Tap Sync for the newest.'));
     var c = card(b, 'Today · ' + Cal.pretty(d));
     c.appendChild(h('div', { class: 'big' }, I.mins + ' ', h('span', { class: 'small muted' }, 'of ' + thr + ' min')));
@@ -187,6 +188,13 @@
         change(function () { return Store.payNow('parent app', s, today()); }, function (r) { return r ? 'Paid ' + money(r.amount) + ' ✓' : 'Nothing was unpaid after the latest sync.'; });
       });
     } }, 'Mark paid ' + money(owe)));
+    // v17 overpaid / double-paid weeks (derived from the payout records; undo voids one payout, merged by id)
+    var OP = Store.overpaidWeeks ? Store.overpaidWeeks() : [];
+    if (OP.length) { var co = card(b, '⚠️ Paid more than earned'); co.id = 'overpaid';
+      co.appendChild(h('p', { class: 'small muted' }, 'These weeks were paid more than she earned – usually two phones or the iPad marked the same week paid. Undo the extra payout if the money was not really handed over twice.'));
+      OP.forEach(function (x) { co.appendChild(h('div', { class: 'flag', 'data-week': x.week }, 'Week of ' + Cal.short(x.week) + ': earned ' + money(x.earned) + ', paid ' + money(x.paid) + ' (' + money(x.over) + ' extra' + (x.double ? ', paid ' + x.payouts.length + ' times' : '') + ')',
+        x.payouts.map(function (p) { return h('div', { class: 'row', style: { marginTop: '4px' } }, h('span', { class: 'small' }, Cal.pretty(p.date) + ' · ' + money(p.amount) + ' · ' + (p.by || '')), h('button', { class: 'btn ghost small', 'data-undo': p.id, onclick: function () {
+          confirmBox('Undo this payout?', 'Removes the ' + money(p.amount) + ' payout from ' + Cal.pretty(p.date) + '. Her stars are kept; those weeks show as unpaid again.', 'Undo payout', function () { change(function () { return Store.undoPay(p.id); }, 'Payout undone ✓'); }); } }, 'Undo')); }))); }); }
     var list = Store.payList(), c2 = card(b, 'Payout history');
     c2.appendChild(list.length ? h('table', null, h('tbody', null, list.map(function (p) { return h('tr', null, h('td', null, Cal.pretty(p.date), h('div', { class: 'small muted' }, Object.keys(p.weeks || {}).length + ' week(s) · ' + (p.by || '')), p.deducted ? h('div', { class: 'small', style: { color: '#c2410c' } }, '−' + money(p.deducted) + ' behavior: ' + Object.keys(p.adj || {}).map(function (k) { var x = (S().moneyAdj || {})[k]; return x ? x.reason : ''; }).concat(Object.keys(p.auto || {}).filter(function (w) { return p.auto[w] > 0; }).map(function (w) { var a = Store.autoWeek(w); return 'rough days, week of ' + Cal.short(w) + ' (' + money(p.auto[w]) + ')' + (a ? ': ' + a.days.map(function (d) { return Cal.short(d.date) + ' score ' + d.score + (d.note ? ' – ' + d.note : ''); }).join('; ') : ''); })).filter(Boolean).join('; ')) : null, p.bonus && Object.keys(p.bonus).length ? h('div', { class: 'small', style: { color: '#1f9d6b' } }, '🌟 +' + money(Object.keys(p.bonus).reduce(function (t, w) { return t + p.bonus[w]; }, 0)) + ' behavior bonus') : null), h('td', { class: 'r' }, h('b', null, money(p.amount)), p.toSave ? h('div', { class: 'small muted' }, money(p.toSave) + ' saved') : null)); }))) : h('p', { class: 'small muted' }, 'No payouts yet. The first one covers every week since ' + Cal.pretty(Store.payFrom()) + '.'));
     var c3 = card(b, 'Savings goal');
@@ -279,6 +287,37 @@
     c4.appendChild(h('p', { class: 'small muted' }, 'Each day starts at this score until you set one.')); c4.appendChild(h('div', { class: 'row' }, def, h('button', { class: 'btn small', style: { flex: '0 0 auto' }, onclick: function () { var v = Math.max(1, Math.min(10, Math.round(+def.value || 8))); change(function () { S().settings.behaviorDefault = v; S().settings._u = Store.now(); }, 'Default is now ' + v + '.'); } }, 'Save')));
   }
 
+  // v17 printable 180-day summary for Georgia records: every day with learning time, minutes per subject, counted or not
+  function summaryRows() {
+    var thr = Store.threshold(), dates = Store.datesWithTime(), subj = {}, rows = dates.map(function (d) { var m = Store.minutesBySubject(d, d), tot = Store.dayMinutes(d); for (var k in m) if (m[k] > 0) subj[k] = 1; return { date: d, by: m, mins: tot, counts: tot >= thr }; }).filter(function (r) { return r.mins > 0; });
+    return { rows: rows, subjects: Object.keys(subj).sort(), thr: thr };
+  }
+  function summaryView(b) {
+    var R = summaryRows(), st = S(), prior = +st.settings.priorDays || 0, n = 0, tot = 0, sums = {};
+    b.appendChild(h('div', { class: 'row no-print', style: { margin: '0 0 10px' } }, h('button', { class: 'btn ghost small', onclick: function () { A.tab = 'plan'; render(); } }, '← Back'), h('button', { class: 'btn gold small', id: 'print-summary', onclick: function () { window.print(); } }, '🖨️ Print')));
+    var c = card(b, ((st.profile && st.profile.name) || 'Ava') + ' – Home study attendance record'); c.id = 'summary180';
+    c.appendChild(h('p', { class: 'small' }, 'School year 2026–27 · Grade ' + ((st.profile && st.profile.grade) || 4) + ' · A day counts at ' + R.thr + ' minutes (' + (R.thr / 60) + ' hours) · Printed ' + Cal.pretty(today())));
+    var body = R.rows.map(function (r) { if (r.counts) n++; tot += r.mins; R.subjects.forEach(function (k) { sums[k] = (sums[k] || 0) + (r.by[k] || 0); });
+      return h('tr', null, h('td', null, r.counts ? String(n + prior) : ''), h('td', null, Cal.short(r.date) + '/' + r.date.slice(2, 4)), R.subjects.map(function (k) { return h('td', { class: 'r' }, r.by[k] ? String(r.by[k]) : ''); }), h('td', { class: 'r' }, String(r.mins)), h('td', null, r.counts ? '✓' : '')); });
+    c.appendChild(h('div', { style: { overflowX: 'auto' } }, h('table', { class: 'sum180' }, h('thead', null, h('tr', null, h('th', null, 'Day #'), h('th', null, 'Date'), R.subjects.map(function (k) { return h('th', { class: 'r' }, subjName(k)); }), h('th', { class: 'r' }, 'Total min'), h('th', null, 'Counts'))),
+      h('tbody', null, body), h('tfoot', null, h('tr', null, h('th', null, ''), h('th', null, 'Total'), R.subjects.map(function (k) { return h('th', { class: 'r' }, fmt(sums[k] || 0)); }), h('th', { class: 'r' }, fmt(tot)), h('th', null, String(n)))))));
+    c.appendChild(h('p', { id: 'sum-total' }, 'Days counted: ' + (n + prior) + ' of 180' + (prior ? ' (' + prior + ' before the app + ' + n + ' in the app)' : '') + '. Total time: ' + fmt(tot) + '.'));
+    c.appendChild(h('p', { class: 'small muted' }, 'Georgia home study (O.C.G.A. 20-2-690): 180 days of 4.5 hours. Parent signature: ______________________   Date: __________'));
+  }
+  // v17 weekly backup reminder (this phone only; nothing synced): downloads the same full backup the kid app makes
+  var BK = 'lastBackup';
+  function backupDue() { var t = +box.getItem(BK) || 0; return Date.now() - t > 7 * 864e5; }
+  function downloadBackup() {
+    var txt = Store.exportAll(), name = 'ava-school-backup-' + today() + '.json';
+    try { var a = h('a', { href: URL.createObjectURL(new Blob([txt], { type: 'application/json' })), download: name }); document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 2000); box.setItem(BK, String(Date.now())); toast('Backup saved: ' + name); render(); }
+    catch (e) { toast('Could not save the backup: ' + e.message, 4000); }
+  }
+  function backupCard(b, always) {
+    var t = +box.getItem(BK) || 0; if (!always && !backupDue()) return;
+    var c = card(b, always ? 'Backup' : '💾 Time for the weekly backup'); c.id = always ? 'backup-card' : 'backup-due';
+    c.appendChild(h('p', { class: 'small muted' }, (t ? 'Last backup from this phone: ' + new Date(t).toLocaleDateString() + '. ' : 'No backup saved from this phone yet. ') + 'Saves everything (lessons, time, stars, payouts, behavior) as a file you can keep in Files, iCloud, or Dropbox.'));
+    c.appendChild(h('button', { class: 'btn small' + (always ? ' ghost' : ' gold'), id: always ? 'backup-now' : 'backup-due-btn', onclick: downloadBackup }, '⬇️ Download backup'));
+  }
   function planView(b) {
     var d = today(), P = Planner.status(d), sug = Planner.suggestions(d, null, Math.min(8, P.short || 0)), st = S();
     var c = card(b, '180-day plan');
@@ -289,6 +328,9 @@
     if (sug.length) { var c2 = card(b, 'Suggested make-up days'); c2.appendChild(h('table', null, h('tbody', null, sug.map(function (x) { return h('tr', null, h('td', null, Cal.pretty(x.date)), h('td', { class: 'small muted' }, x.why)); })))); c2.appendChild(h('p', { class: 'small muted' }, 'Add them in the kid app: Parent → Settings → Make-up planner.')); }
     var mk = (st.settings.makeup || []).filter(function (x) { return x >= d; });
     if (mk.length) { var c3 = card(b, 'Upcoming make-up days'); c3.appendChild(h('p', null, mk.slice(0, 12).map(function (x) { return Cal.short(x); }).join(', '))); }
+    var cs = card(b, 'Records'); cs.appendChild(h('p', { class: 'small muted' }, 'A printable list of every school day: date, minutes per subject, and whether it counted.'));
+    cs.appendChild(h('button', { class: 'btn small', id: 'open-summary', onclick: function () { A.tab = 'summary'; render(); window.scrollTo(0, 0); } }, '🖨️ 180-day summary'));
+    backupCard(b, true);
     var c4 = card(b, 'Account');
     c4.appendChild(h('p', { class: 'small muted' }, 'Signed in as ' + (Sync.auth && Sync.auth.email || '') + '. The parent PIN stays in the kid app.'));
     c4.appendChild(h('button', { class: 'btn ghost small', onclick: function () { confirmBox('Sign out?', 'The copy on this phone is kept; you will need the family password to sign in again.', 'Sign out', function () { Sync.signOut(); render(); }); } }, 'Sign out'));
@@ -298,5 +340,13 @@
   render();
   if (Sync.auth) sync(true).then(render);
   document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible' && Sync.auth) sync(true).then(render); });
-  if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) navigator.serviceWorker.register('sw.js', { scope: './' }).catch(function () { });
+  if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) navigator.serviceWorker.register('sw.js', { scope: './' }).then(function (reg) {
+    // v17 'new version' banner: the service worker activates the new files at once (skipWaiting + claim); tell her so one tap loads them.
+    var had = !!navigator.serviceWorker.controller, shown = false;
+    navigator.serviceWorker.addEventListener('controllerchange', function () { if (!had) { had = true; return; } if (shown) return; shown = true;
+      var b = document.createElement('button'); b.id = 'update-banner'; b.type = 'button'; b.textContent = '✨ New version ready – tap to refresh';
+      b.setAttribute('style', 'position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom));z-index:9999;padding:12px 18px;border:0;border-radius:999px;background:#1b2a4e;color:#fff;font:600 16px system-ui,sans-serif;box-shadow:0 4px 16px rgba(0,0,0,.3)');
+      b.onclick = function () { try { if (window.Store) Store.save(); } catch (e) { } location.reload(); }; document.body.appendChild(b); });
+    document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible' && reg && reg.update) reg.update().catch(function () { }); });
+  }).catch(function () { });
 })();

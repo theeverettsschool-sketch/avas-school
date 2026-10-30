@@ -41,7 +41,7 @@
     if (!Sync.auth) throw new Error('Not signed in.');
     if (Date.now() < Sync.auth.exp) return Sync.auth.idToken;
     var r = await f()('https://securetoken.googleapis.com/v1/token?key=' + Sync.cfg.apiKey, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'grant_type=refresh_token&refresh_token=' + encodeURIComponent(Sync.auth.refreshToken) });
-    var j = await r.json(); if (!r.ok) { signOut(); throw new Error('Sign-in expired. Sign in again.'); }
+    var j = await r.json().catch(function () { return {}; }); if (!r.ok) { if (r.status === 400 || r.status === 401 || r.status === 403) { signOut(); throw new Error('Sign-in expired. Sign in again.'); } throw new Error('Could not reach sign-in service (' + r.status + '); will retry.'); }
     Sync.auth.idToken = j.id_token; Sync.auth.refreshToken = j.refresh_token; Sync.auth.exp = Date.now() + (+j.expires_in - 60) * 1000; saveAuth();
     return Sync.auth.idToken;
   }

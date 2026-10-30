@@ -29,3 +29,7 @@ label{display:block;font-size:.85rem;font-weight:600;margin:10px 0 4px}
 .err{color:var(--bad);font-size:.9rem;margin-top:8px}
 details summary{cursor:pointer;font-weight:600;padding:4px 0}
 .login{max-width:420px;margin:8vh auto 0}
+
+/* v17 print: 180-day summary */
+table.sum180{font-size:13px;border-collapse:collapse}table.sum180 td,table.sum180 th{padding:3px 6px;border-bottom:1px solid #ddd;white-space:nowrap}
+@media print{header,nav,.no-print,.toast,#update-banner{display:none!important}body{background:#fff!important;color:#000!important}main{padding:0!important;max-width:none!important}.card{box-shadow:none!important;border:0!important;background:#fff!important;color:#000!important}table.sum180{font-size:10px}}
